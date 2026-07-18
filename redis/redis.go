@@ -202,7 +202,8 @@ func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
 	return r.rdb.LPush(bg, kvspace.ResolveCore(key, r.checkLink), kvspace.EncodeXValue(val)).Err()
 }
 
-func (r *redisImpl) DisConn() error { return r.rdb.Close() }
+func (r *redisImpl) ClearAll() error { return r.rdb.FlushDB(bg).Err() }
+func (r *redisImpl) DisConn() error   { return r.rdb.Close() }
 
 // ── 内部工具 ──────────────────────────────────────────────────────────────────
 

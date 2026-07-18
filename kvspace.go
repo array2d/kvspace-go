@@ -47,5 +47,6 @@ type KVSpace interface {
 	Unlink(linkpath string) error       // 删除链接本身（不影响 target）
 
 	// ── 生命周期 ─────────────────────────────────────────────────────────
+	ClearAll() error // 清空全部数据（Redis: FLUSHDB）
 	DisConn() error
 }

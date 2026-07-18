@@ -2,8 +2,6 @@ package kvspace
 
 import (
 	"encoding/binary"
-	"strconv"
-	"strings"
 )
 
 // ── 1D 数组 ──────────────────────────────────────────────────────────────
@@ -131,29 +129,6 @@ func FlatIndex(indices, stride []int) int {
 	return f
 }
 
-// ShapeKey 返回 array path 对应的 shape 子 key。
-func ShapeKey(path string) string { return path + "/shape" }
-
-// ShapeString 将 shape 转为逗号分隔字符串（如 "2,3"）。
-func ShapeString(shape []int) string {
-	parts := make([]string, len(shape))
-	for i, d := range shape {
-		parts[i] = strconv.Itoa(d)
-	}
-	return strings.Join(parts, ",")
-}
-
-// ParseShape 从逗号分隔字符串解析 shape。
-func ParseShape(s string) []int {
-	if s == "" { return nil }
-	parts := strings.Split(s, ",")
-	dims := make([]int, len(parts))
-	for i, p := range parts {
-		d, _ := strconv.Atoi(strings.TrimSpace(p))
-		dims[i] = d
-	}
-	return dims
-}
 
 // ── 高维访问 ─────────────────────────────────────────────────────────────
 //
