@@ -25,6 +25,7 @@ func main() {
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvspace [--kvspace dsn] <subcommand> [args]")
 		fmt.Fprintln(os.Stderr, "subcommands: get mget set del list tree dump watch notify clear")
+		fmt.Fprintln(os.Stderr, "  clear 清空整个后端 db（redis: FLUSHDB）——共享 Redis 实例慎用")
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[1:])

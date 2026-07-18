@@ -49,6 +49,8 @@ type KVSpace interface {
 	Unlink(linkpath string) error       // 删除链接本身（不影响 target）
 
 	// ── 生命周期 ─────────────────────────────────────────────────────────
-	ClearAll() error // 清空全部数据（Redis: FLUSHDB）
+	// ClearAll 清空整个后端命名空间（fix-019 契约第 13 方法）。
+	// 范围警示：redis 实现 = FLUSHDB，清空所在 db 的全部键——共享 Redis 实例时会波及非 kvlang 数据。
+	ClearAll() error
 	DisConn() error
 }
