@@ -53,9 +53,24 @@ func (v XValue) Int32() int32 {
 	if v.kind != "int32" || len(v.raw) < 4 { return 0 }
 	return int32(binary.LittleEndian.Uint32(v.raw))
 }
+// Int64 宽容整型读取器（对标 Go reflect.Value.Int）：按 kind 实际宽度解码，窄类型符号扩展。
+// 精确访问器（Int8/Int16/...）仍严格校验 kind。
 func (v XValue) Int64() int64 {
-	if v.kind != "int64" || len(v.raw) < 8 { return 0 }
-	return int64(binary.LittleEndian.Uint64(v.raw))
+	switch v.kind {
+	case "int", "int64":
+		if len(v.raw) < 8 { return 0 }
+		return int64(binary.LittleEndian.Uint64(v.raw))
+	case "int32":
+		if len(v.raw) < 4 { return 0 }
+		return int64(int32(binary.LittleEndian.Uint32(v.raw)))
+	case "int16":
+		if len(v.raw) < 2 { return 0 }
+		return int64(int16(binary.LittleEndian.Uint16(v.raw)))
+	case "int8":
+		if len(v.raw) < 1 { return 0 }
+		return int64(int8(v.raw[0]))
+	}
+	return 0
 }
 func (v XValue) Int() int64 { return v.Int64() } // alias
 
@@ -73,9 +88,23 @@ func (v XValue) Uint32() uint32 {
 	if v.kind != "uint32" || len(v.raw) < 4 { return 0 }
 	return binary.LittleEndian.Uint32(v.raw)
 }
+// Uint64 宽容无符号读取器：按 kind 实际宽度解码（对标 Go reflect.Value.Uint）。
 func (v XValue) Uint64() uint64 {
-	if v.kind != "uint64" || len(v.raw) < 8 { return 0 }
-	return binary.LittleEndian.Uint64(v.raw)
+	switch v.kind {
+	case "uint64":
+		if len(v.raw) < 8 { return 0 }
+		return binary.LittleEndian.Uint64(v.raw)
+	case "uint32":
+		if len(v.raw) < 4 { return 0 }
+		return uint64(binary.LittleEndian.Uint32(v.raw))
+	case "uint16":
+		if len(v.raw) < 2 { return 0 }
+		return uint64(binary.LittleEndian.Uint16(v.raw))
+	case "uint8":
+		if len(v.raw) < 1 { return 0 }
+		return uint64(v.raw[0])
+	}
+	return 0
 }
 
 // ── 浮点访问器 ────────────────────────────────────────────────────────────
