@@ -34,3 +34,14 @@ func ResolveCore(path string, lookup func(string) string) string {
 	}
 	return path
 }
+
+// ResolveParent 删除语义的路径解析：祖先链接穿透，末段保留本体（POSIX rm 式）。
+// Del/DelTree/Unlink 的最终组件作用于链接本身，不穿透到 target；
+// 路径中的祖先链接仍正常穿透（Del("/alias/x") 删 /real/x）。
+func ResolveParent(path string, lookup func(string) string) string {
+	slash := strings.LastIndexByte(path, '/')
+	if slash <= 0 {
+		return path // 根层键或异常形态：无祖先可穿透
+	}
+	return ResolveCore(path[:slash], lookup) + path[slash:]
+}

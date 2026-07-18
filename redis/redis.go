@@ -161,9 +161,15 @@ func (r *redisImpl) SetMany(pairs []kvspace.KVPair) error {
 func (r *redisImpl) Del(keys ...string) error {
 	resolved := make([]string, len(keys))
 	for i, k := range keys {
-		resolved[i] = kvspace.ResolveCore(k, r.checkLink)
+		// 末段不穿透链接：Del 作用于链接本体（fix-014，POSIX rm 语义）
+		resolved[i] = kvspace.ResolveParent(k, r.checkLink)
 	}
 	err := r.rdb.Del(bg, resolved...).Err()
+	r.linkMu.Lock()
+	for _, k := range resolved {
+		r.links[k] = linkEntry{checked: true, target: ""} // 键已删，失效链接缓存
+	}
+	r.linkMu.Unlock()
 	for _, k := range resolved {
 		r.delIndex(k)
 	}
@@ -171,10 +177,11 @@ func (r *redisImpl) Del(keys ...string) error {
 }
 
 func (r *redisImpl) DelTree(prefix string) error {
-	if r.checkLink(prefix) != "" {
-		return r.Unlink(prefix) // 链接只删链接，不动 target 树
+	// 祖先穿透、末段本体：嵌套于链接下的路径也能正确定位链接自身（fix-014）
+	resolved := kvspace.ResolveParent(prefix, r.checkLink)
+	if r.checkLink(resolved) != "" {
+		return r.Unlink(resolved) // 链接只删链接，不动 target 树
 	}
-	resolved := kvspace.ResolveCore(prefix, r.checkLink)
 	r.delRecursive(resolved)
 	r.delIndex(resolved)
 	return nil

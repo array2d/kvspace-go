@@ -24,6 +24,8 @@ type KVPair struct {
 //	Watch(key, timeout) 阻塞等待下一次 Notify；超时返回 (Value{}, ErrNotFound)。
 //
 // 软链接透明穿透：Link(target, linkpath) 后，访问 linkpath/x 透明地访问 target/x。
+// 删除语义例外（POSIX rm 式）：Del/DelTree/Unlink 的最终组件作用于链接本体，
+// 不穿透 target；路径中的祖先链接仍穿透（Del("/alias/x") 删 /real/x）。
 type KVSpace interface {
 	// ── 单点读写 ─────────────────────────────────────────────────────────
 	Get(key string) (XValue, error)   // key 不存在返回 (Value{}, ErrNotFound)
