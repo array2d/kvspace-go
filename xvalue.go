@@ -49,7 +49,6 @@ func (v XValue) String() string {
 		return "float32:" + strconv.FormatFloat(float64(v.Float32()), 'f', -1, 32)
 	case "float64":
 		return "float64:" + strconv.FormatFloat(v.Float64(), 'f', -1, 64)
-	case "int":
 		return "int:" + strconv.FormatInt(v.Int64(), 10)
 	case "float":
 		return "float:" + strconv.FormatFloat(v.Float64(), 'f', -1, 64)
@@ -60,7 +59,7 @@ func (v XValue) String() string {
 	case "rwir":
 		return "rwir:" + string(v.raw)
 	default:
-		return v.kind + ":" + strconv.Itoa(len(v.raw)) + "B"
+		return v.kind + ":" + string(v.raw)
 	}
 }
 
