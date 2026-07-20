@@ -132,13 +132,11 @@ func printTree(kv kvspace.KVSpace, prefix, indent string) {
 }
 
 func dumpPrefix(kv kvspace.KVSpace, prefix string) {
-	if valV, err := kv.Get(prefix); err == nil && !valV.IsNil() {
-		short := strings.ReplaceAll(valV.String(), "\n", "↵")
+	kvspace.Walk(kv, prefix, func(path string, v kvspace.XValue) {
+		short := strings.ReplaceAll(v.String(), "\n", "↵")
 		if len(short) > 80 { short = short[:80] + "…" }
-		fmt.Printf("%-60s %s\n", prefix, short)
-	}
-	children, _ := kv.List(prefix)
-	for _, c := range children { dumpPrefix(kv, prefix+"/"+c) }
+		fmt.Printf("%-60s %s\n", path, short)
+	})
 }
 
 func parseValue(raw string) (kvspace.XValue, error) {

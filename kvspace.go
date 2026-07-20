@@ -54,3 +54,15 @@ type KVSpace interface {
 	ClearAll() error
 	DisConn() error
 }
+
+// Walk 递归遍历 prefix 下的 KV 树，对每个节点调用 fn(path, value)。
+// 节点无值时 value 为 nil；遍历顺序为深度优先。
+func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
+	if v, err := kv.Get(prefix); err == nil && !v.IsNil() {
+		fn(prefix, v)
+	}
+	children, _ := kv.List(prefix)
+	for _, c := range children {
+		Walk(kv, prefix+"/"+c, fn)
+	}
+}
