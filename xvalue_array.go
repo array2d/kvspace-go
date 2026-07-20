@@ -20,15 +20,6 @@ func Array(elems []XValue) XValue {
 	return XValue{kind: k, arraylength: n, raw: raw}
 }
 
-// ArrayInts 构造整数 1D 数组的便捷方法。
-func ArrayInts(vals []int64) XValue {
-	elems := make([]XValue, len(vals))
-	for i, v := range vals {
-		elems[i] = Int64(v)
-	}
-	return Array(elems)
-}
-
 // IsArray 判断是否为数组（arraylength > 1）。
 func (v XValue) IsArray() bool { return v.ArrayLen() > 1 }
 
