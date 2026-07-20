@@ -6,28 +6,41 @@ import (
 
 // ── 1D 数组 ──────────────────────────────────────────────────────────────
 //
-// XValue{kind: "array"} 存储同类型元素的线性序列。
-// raw 格式：[4B count LE][elem0 TLV][elem1 TLV]...
-// 每个元素独立 EncodeXValue，保留自身类型。
+// 数组性由 arraylength > 1 判定，不再有独立的 "array" kind。
+// 同构定长类型（int/float/bool 等）用定长打包；变长类型（string）用 TLV per-element。
+// raw 格式（TLV 变长）：[4B count LE][elem0 TLV][elem1 TLV]...
+// raw 格式（定长打包）：elementSize * arraylength 字节连续存储。
 
-const KindArray = "array"
-
-// Array 构造 1D 数组。元素可以是任意 XValue（类型可混合）。
+// Array 构造 1D TLV 数组（变长类型如 string 使用）。
+// 固定长度类型优先用 RawN + 定长 raw 直接构造。
 func Array(elems []XValue) XValue {
-	total := 4 // count header
+	n := int32(len(elems))
+	if n == 0 { return XValue{} }
+	k := elems[0].Kind()
+	// 尝试定长打包
+	sz := kindSize(k)
+	if sz > 0 {
+		raw := make([]byte, n*sz)
+		for i, e := range elems {
+			copy(raw[i*int(sz):], e.RawBytes())
+		}
+		return XValue{kind: k, arraylength: n, raw: raw}
+	}
+	// 变长 TLV
+	total := 4
 	encoded := make([][]byte, len(elems))
 	for i, e := range elems {
 		encoded[i] = EncodeXValue(e)
 		total += len(encoded[i])
 	}
 	raw := make([]byte, total)
-	binary.LittleEndian.PutUint32(raw[:4], uint32(len(elems)))
+	binary.LittleEndian.PutUint32(raw[:4], uint32(n))
 	off := 4
 	for _, enc := range encoded {
 		copy(raw[off:], enc)
 		off += len(enc)
 	}
-	return XValue{kind: KindArray, arraylength: int32(len(elems)), raw: raw}
+	return XValue{kind: k, arraylength: n, raw: raw}
 }
 
 // ArrayInts 构造整数 1D 数组的便捷方法。
@@ -39,20 +52,32 @@ func ArrayInts(vals []int64) XValue {
 	return Array(elems)
 }
 
-// Len 返回数组元素个数。非数组类型返回 0。
+// IsArray 判断是否为数组（arraylength > 1）。
+func (v XValue) IsArray() bool { return v.ArrayLen() > 1 }
+
+// Len 返回 TLV 数组元素个数。同构数组用 ArrayLen()。
 func (v XValue) Len() int {
-	if v.kind != KindArray || len(v.raw) < 4 {
-		return 0
-	}
+	al := v.ArrayLen()
+	if al > 1 { return int(al) }
+	if len(v.raw) < 4 { return 0 }
 	return int(binary.LittleEndian.Uint32(v.raw[:4]))
 }
 
-// Index 返回数组的第 i 个元素。越界返回 nil。
+// Index 返回数组的第 i 个元素。支持 TLV 和定长两种编码。
 func (v XValue) Index(i int) XValue {
-	n := v.Len()
-	if i < 0 || i >= n {
-		return XValue{}
+	n := int(v.ArrayLen())
+	if n == 0 { n = v.Len() }
+	if i < 0 || i >= n { return XValue{} }
+	sz := kindSize(v.kind)
+	if sz > 0 {
+		// 定长：直接偏移
+		off := i * int(sz)
+		if off+int(sz) > len(v.raw) { return XValue{} }
+		raw := make([]byte, sz)
+		copy(raw, v.raw[off:off+int(sz)])
+		return XValue{kind: v.kind, arraylength: 1, raw: raw}
 	}
+	// TLV 变长
 	off := 4
 	for j := 0; j < i; j++ {
 		_, size := decodeXValueLen(v.raw[off:])
@@ -62,85 +87,22 @@ func (v XValue) Index(i int) XValue {
 	return DecodeXValue(v.raw[off : off+elem])
 }
 
-// decodeXValueLen 返回 (总字节数, 消耗的 raw 字节数)。不分配内存。
+func kindSize(k string) int32 {
+	switch k {
+	case "bool", "int8", "uint8": return 1
+	case "int16", "uint16": return 2
+	case "int32", "uint32", "float32": return 4
+	case "int64", "uint64", "float64", "float", "int": return 8
+	default: return 0
+	}
+}
+
+// decodeXValueLen 返回新版 TLV 元素的总字节数和消耗的 raw 字节数。
 func decodeXValueLen(data []byte) (total, consumed int) {
-	if len(data) == 0 {
-		return 0, 1
-	}
+	if len(data) == 0 { return 0, 1 }
 	kindLen := int(data[0])
-	if len(data) < 1+kindLen+4 {
-		return 0, len(data)
-	}
-	rawLen := int(binary.LittleEndian.Uint32(data[1+kindLen:]))
-	consumed = 1 + kindLen + 4 + rawLen
+	if len(data) < 1+kindLen+4+4 { return 0, len(data) }
+	rawLen := int(binary.LittleEndian.Uint32(data[1+kindLen+4:]))
+	consumed = 1 + kindLen + 4 + 4 + rawLen
 	return consumed, consumed
-}
-
-// ── ND 数组（高维） ──────────────────────────────────────────────────────
-//
-// 高维数组主体存为 1D 数组（逐元素 EncodeXValue），
-// 维度信息存于相邻 key {path}/shape，值为 1D 整数数组。
-
-// Shape 返回数组的形状（从 {path}/shape key 读取）。
-// 1D 数组：返回 [len]。
-// ND 数组：需要调用方传入从 KV 读取的 shape XValue。
-func (v XValue) Shape(shapeVal XValue) []int {
-	n := v.Len()
-	if n == 0 {
-		return nil
-	}
-	if shapeVal.IsNil() {
-		return []int{n} // 无 shape → 视为 1D
-	}
-	if shapeVal.kind != KindArray {
-		return []int{n} // shape 不是数组 → 回退
-	}
-	dims := make([]int, shapeVal.Len())
-	for i := range dims {
-		dims[i] = int(shapeVal.Index(i).Int64())
-	}
-	return dims
-}
-
-// Stride 从 shape 计算 row-major stride。
-// shape=[d0,d1,d2] → stride=[d1*d2, d2, 1]
-func Stride(shape []int) []int {
-	if len(shape) == 0 {
-		return nil
-	}
-	s := make([]int, len(shape))
-	s[len(shape)-1] = 1
-	for i := len(shape) - 2; i >= 0; i-- {
-		s[i] = s[i+1] * shape[i+1]
-	}
-	return s
-}
-
-// FlatIndex 将多维索引 [i0,i1,...,in-1] 转为平坦索引。
-// flat = sum(indices[k] * stride[k])
-func FlatIndex(indices, stride []int) int {
-	if len(indices) != len(stride) {
-		return -1
-	}
-	f := 0
-	for i := range indices {
-		f += indices[i] * stride[i]
-	}
-	return f
-}
-
-
-// ── 高维访问 ─────────────────────────────────────────────────────────────
-//
-// a[i, j, k] → At([]int{i, j, k}, stride) 返回 XValue
-// stride 由 Shape + Stride 预计算，调用方缓存避免重复计算。
-
-// At 用多维索引 + stride 读取数组元素。
-// indices 长度必须等于 stride 长度。
-func (v XValue) At(indices, stride []int) XValue {
-	f := FlatIndex(indices, stride)
-	if f < 0 {
-		return XValue{}
-	}
-	return v.Index(f)
 }

@@ -51,31 +51,34 @@ func (v XValue) ArrayLen() int32 {
 
 // ── Stringer ─────────────────────────────────────────────────────────────
 
-// String 实现 fmt.Stringer，输出 "kind:repr" 调试格式。
-// 获取 string 类型内容请用 v.Str()。
+// String 实现 fmt.Stringer，输出 "kind[N]:repr" 调试格式。
 func (v XValue) String() string {
+	n := v.ArrayLen()
+	tag := v.kind
+	if n > 1 { tag = v.kind + "[" + strconv.Itoa(int(n)) + "]" }
 	switch v.kind {
 	case "", "null":
 		return "null"
 	case "int8", "int16", "int32", "int64":
-		return v.kind + ":" + strconv.FormatInt(v.Int64(), 10)
+		return tag + ":" + strconv.FormatInt(v.Int64(), 10)
 	case "uint8", "uint16", "uint32", "uint64":
-		return v.kind + ":" + strconv.FormatUint(v.Uint64(), 10)
+		return tag + ":" + strconv.FormatUint(v.Uint64(), 10)
 	case "float32":
-		return "float32:" + strconv.FormatFloat(float64(v.Float32()), 'f', -1, 32)
+		return tag + ":" + strconv.FormatFloat(float64(v.Float32()), 'f', -1, 32)
 	case "float64":
-		return "float64:" + strconv.FormatFloat(v.Float64(), 'f', -1, 64)
-		return "int:" + strconv.FormatInt(v.Int64(), 10)
+		return tag + ":" + strconv.FormatFloat(v.Float64(), 'f', -1, 64)
+	case "int":
+		return tag + ":" + strconv.FormatInt(v.Int64(), 10)
 	case "float":
-		return "float:" + strconv.FormatFloat(v.Float64(), 'f', -1, 64)
+		return tag + ":" + strconv.FormatFloat(v.Float64(), 'f', -1, 64)
 	case "bool":
-		return "bool:" + strconv.FormatBool(v.Bool())
+		return tag + ":" + strconv.FormatBool(v.Bool())
 	case "string":
-		return "string:" + v.Str()
+		return tag + ":" + v.Str()
 	case "rwir":
 		return "rwir:" + string(v.raw)
 	default:
-		return v.kind + ":" + string(v.raw)
+		return tag + ":" + string(v.raw)
 	}
 }
 
