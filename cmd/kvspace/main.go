@@ -24,7 +24,7 @@ func main() {
 	dsn := fs.String("kvspace", defaultKVSpace(), "kvspace DSN (redis://host:port)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvspace [--kvspace dsn] <subcommand> [args]")
-		fmt.Fprintln(os.Stderr, "subcommands: get mget set mset del deltree link unlink list tree dump watch notify clear")
+		fmt.Fprintln(os.Stderr, "subcommands: get mget set mset del deltree link unlink list tree table dump watch notify clear")
 		fmt.Fprintln(os.Stderr, "  clear 清空整个后端 db（redis: FLUSHDB）——共享 Redis 实例慎用")
 		fs.PrintDefaults()
 	}
@@ -127,14 +127,81 @@ func cmdWatch(kv kvspace.KVSpace, args []string) {
 
 func printTree(kv kvspace.KVSpace, prefix, indent string) {
 	children, _ := kv.List(prefix)
+	if len(children) > 0 && isSlotTable(children) {
+		printSlotTable(kv, prefix, indent, children)
+		return
+	}
 	for i, c := range children {
 		last := i == len(children)-1
 		branch := "├── "
 		if last { branch = "└── " }
-		if v, err := kv.Get(prefix+"/"+c); err == nil && !v.IsNil() { fmt.Printf("%s%s%s\t%s\n", indent, branch, c, v) } else { fmt.Printf("%s%s%s\n", indent, branch, c) }
+		if v, err := kv.Get(prefix+"/"+c); err == nil && !v.IsNil() {
+			fmt.Printf("%s%s%s\t%s\n", indent, branch, c, v)
+		} else {
+			fmt.Printf("%s%s%s\n", indent, branch, c)
+		}
 		next := indent + "│   "
 		if last { next = indent + "    " }
 		printTree(kv, prefix+"/"+c, next)
+	}
+}
+
+func isSlotTable(children []string) bool {
+	for _, c := range children {
+		if !strings.HasPrefix(c, "[") || !strings.HasSuffix(c, "]") {
+			return false
+		}
+	}
+	return true
+}
+
+func printSlotTable(kv kvspace.KVSpace, prefix, indent string, slots []string) {
+	// 解析 [s0,s1]，找 s1 范围
+	type slot struct{ s0, s1 int; val string }
+	var rows []slot
+	minS1, maxS1 := 0, 0
+	maxS0 := 0
+	for _, s := range slots {
+		var s0, s1 int
+		fmt.Sscanf(s, "[%d,%d]", &s0, &s1)
+		v, _ := kv.Get(prefix + "/" + s)
+		val := "(nil)"
+		if !v.IsNil() { val = v.String() }
+		rows = append(rows, slot{s0, s1, val})
+		if s1 < minS1 { minS1 = s1 }
+		if s1 > maxS1 { maxS1 = s1 }
+		if s0 > maxS0 { maxS0 = s0 }
+	}
+	// 构建 2D 数组: rows[s0][s1-minS1]
+	grid := make([][]string, maxS0+1)
+	for i := range grid {
+		row := make([]string, maxS1-minS1+1)
+		for j := range row { row[j] = "" }
+		grid[i] = row
+	}
+	for _, r := range rows {
+		grid[r.s0][r.s1-minS1] = r.val
+	}
+	// 列序：负 s1 降序（-1,-2,...），0，正 s1 升序（1,2,...）→ 源码顺序
+	colOrder := make([]int, 0, maxS1-minS1+1)
+	for s1 := -1; s1 >= minS1; s1-- {
+		colOrder = append(colOrder, s1)
+	}
+	for s1 := 0; s1 <= maxS1; s1++ {
+		if s1 >= 0 {
+			colOrder = append(colOrder, s1)
+		}
+	}
+	// 打印：每行 [s0] \t cell \t cell ...
+	for s0 := 0; s0 <= maxS0; s0++ {
+		rowLast := s0 == maxS0
+		branch := "├── "
+		if rowLast { branch = "└── " }
+		fmt.Fprint(os.Stdout, indent+branch+fmt.Sprintf("[%d]", s0))
+		for _, s1 := range colOrder {
+			fmt.Fprint(os.Stdout, "\t"+grid[s0][s1-minS1])
+		}
+		fmt.Fprintln(os.Stdout)
 	}
 }
 
