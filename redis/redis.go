@@ -9,7 +9,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	"github.com/array2d/kvlang-go"
+	"github.com/array2d/kvspace-go"
 )
 
 func init() {
@@ -141,8 +141,8 @@ func (r *redisImpl) Set(key string, val kvspace.XValue) error {
 	return r.rdb.Set(bg, resolved, kvspace.EncodeXValue(val), 0).Err()
 }
 
-// SetMany 使用 pipeline 批量写入，N 对 key 的索引维护合并为单次 round trip。
-func (r *redisImpl) SetMany(pairs []kvspace.KVPair) error {
+// MSet 使用 pipeline 批量写入，N 对 key 的索引维护合并为单次 round trip。
+func (r *redisImpl) MSet(pairs []kvspace.KVPair) error {
 	if len(pairs) == 0 {
 		return nil
 	}
@@ -271,7 +271,7 @@ func (r *redisImpl) delIndex(key string) {
 }
 
 // pipeIndex 向 pipeline 追加该 key 的全部层级 SADD 索引命令（addIndex 的批量版）。
-// 供 SetMany 使用，将多 key 的索引维护合并为一次 pipeline 执行。
+// 供 MSet 使用，将多 key 的索引维护合并为一次 pipeline 执行。
 func pipeIndex(pipe goredis.Pipeliner, key string) {
 	prefix := ""
 	for _, p := range strings.Split(key, "/")[1:] {

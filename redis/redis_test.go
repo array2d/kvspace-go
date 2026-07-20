@@ -3,7 +3,7 @@ package redis
 import (
 	"testing"
 
-	kvspace "github.com/array2d/kvlang-go"
+	kvspace "github.com/array2d/kvspace-go"
 )
 
 // ResolveCore 单元测试（纯函数，无 Redis）

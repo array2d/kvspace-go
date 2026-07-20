@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/array2d/kvlang-go"
-	_ "github.com/array2d/kvlang-go/redis"
+	"github.com/array2d/kvspace-go"
+	_ "github.com/array2d/kvspace-go/redis"
 )
 
 func defaultKVSpace() string {
@@ -24,7 +24,7 @@ func main() {
 	dsn := fs.String("kvspace", defaultKVSpace(), "kvspace DSN (redis://host:port)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvspace [--kvspace dsn] <subcommand> [args]")
-		fmt.Fprintln(os.Stderr, "subcommands: get mget set del list tree dump watch notify clear")
+		fmt.Fprintln(os.Stderr, "subcommands: get mget set mset del deltree link unlink list tree dump watch notify clear")
 		fmt.Fprintln(os.Stderr, "  clear 清空整个后端 db（redis: FLUSHDB）——共享 Redis 实例慎用")
 		fs.PrintDefaults()
 	}
@@ -57,6 +57,24 @@ func main() {
 	case "del":
 		if len(sub) < 2 { exitUsage("kvspace del <key1> [key2 ...]") }
 		if err := kv.Del(sub[1:]...); err != nil { fatalf("%v", err) }
+	case "mset":
+		if len(sub) < 3 || len(sub[1:])%2 != 0 { exitUsage("kvspace mset <k1> <v1> [k2 v2 ...]") }
+		pairs := make([]kvspace.KVPair, 0, len(sub[1:])/2)
+		for i := 1; i < len(sub); i += 2 {
+			v, err := parseValue(sub[i+1])
+			if err != nil { fatalf("%v", err) }
+			pairs = append(pairs, kvspace.KVPair{Key: sub[i], Val: v})
+		}
+		if err := kv.MSet(pairs); err != nil { fatalf("%v", err) }
+	case "deltree":
+		if len(sub) < 2 { exitUsage("kvspace deltree <prefix>") }
+		if err := kv.DelTree(sub[1]); err != nil { fatalf("%v", err) }
+	case "link":
+		if len(sub) < 3 { exitUsage("kvspace link <target> <linkpath>") }
+		if err := kv.Link(sub[1], sub[2]); err != nil { fatalf("%v", err) }
+	case "unlink":
+		if len(sub) < 2 { exitUsage("kvspace unlink <linkpath>") }
+		if err := kv.Unlink(sub[1]); err != nil { fatalf("%v", err) }
 	case "list":
 		if len(sub) < 2 { exitUsage("kvspace list <prefix>") }
 		children, err := kv.List(sub[1])

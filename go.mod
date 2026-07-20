@@ -1,4 +1,4 @@
-module github.com/array2d/kvlang-go
+module github.com/array2d/kvspace-go
 
 go 1.24.0
 

@@ -34,7 +34,7 @@ type KVSpace interface {
 
 	// ── 批量读写 ─────────────────────────────────────────────────────────
 	GetMany(keys []string) ([]XValue, error) // 缺失位置返回 Value{}，不返回 error
-	SetMany(pairs []KVPair) error           // 批量写入
+	MSet(pairs []KVPair) error           // 批量写入
 
 	// ── 目录操作 ─────────────────────────────────────────────────────────
 	List(prefix string) ([]string, error) // 列出直接子项名
