@@ -57,6 +57,8 @@ func (v XValue) String() string {
 		return "bool:" + strconv.FormatBool(v.Bool())
 	case "string":
 		return "string:" + v.Str()
+	case "rwir":
+		return "rwir:" + string(v.raw)
 	default:
 		return v.kind + ":" + strconv.Itoa(len(v.raw)) + "B"
 	}

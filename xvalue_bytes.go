@@ -9,6 +9,10 @@ func (v XValue) Str() string {
 	return string(v.raw)
 }
 
+// ── rwir 指令槽 ────────────────────────────────────────────────────────────
+
+func Rwir(v string) XValue { return XValue{kind: "rwir", raw: []byte(v)} }
+
 // ── 字节数组 ──────────────────────────────────────────────────────────────
 
 func Bytes(v []byte) XValue {

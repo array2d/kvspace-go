@@ -41,7 +41,7 @@ func main() {
 		if len(sub) < 2 { exitUsage("kvspace get <key>") }
 		v, err := kv.Get(sub[1])
 		if err != nil { fatalf("%v", err) }
-		fmt.Println(v)
+		if v.IsNil() { fmt.Printf("%s	(nil)\n", sub[1]) } else { fmt.Printf("%s	%s\n", sub[1], v) }
 	case "mget":
 		if len(sub) < 2 { exitUsage("kvspace mget <key1> [key2 ...]") }
 		vals, err := kv.GetMany(sub[1:])
@@ -79,7 +79,14 @@ func main() {
 		if len(sub) < 2 { exitUsage("kvspace list <prefix>") }
 		children, err := kv.List(sub[1])
 		if err != nil { fatalf("%v", err) }
-		for _, c := range children { fmt.Println(c) }
+		for _, c := range children {
+			p := sub[1] + "/" + c
+			if v, err := kv.Get(p); err == nil && !v.IsNil() {
+				fmt.Printf("%s	%s\n", c, v)
+			} else {
+				fmt.Printf("%s	(nil)\n", c)
+			}
+		}
 	case "tree":
 		if len(sub) < 2 { exitUsage("kvspace tree <prefix>") }
 		fmt.Println(sub[1])
@@ -124,7 +131,7 @@ func printTree(kv kvspace.KVSpace, prefix, indent string) {
 		last := i == len(children)-1
 		branch := "├── "
 		if last { branch = "└── " }
-		fmt.Printf("%s%s%s\n", indent, branch, c)
+		if v, err := kv.Get(prefix+"/"+c); err == nil && !v.IsNil() { fmt.Printf("%s%s%s\t%s\n", indent, branch, c, v) } else { fmt.Printf("%s%s%s\n", indent, branch, c) }
 		next := indent + "│   "
 		if last { next = indent + "    " }
 		printTree(kv, prefix+"/"+c, next)
