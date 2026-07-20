@@ -8,23 +8,23 @@ import (
 // ── 整型构造函数 ─────────────────────────────────────────────────────────
 // 小端编码，固定宽度
 
-func Int8(v int8) XValue   { return XValue{kind: "int8", raw: encodeInt8(v)} }
-func Int16(v int16) XValue  { return XValue{kind: "int16", raw: encodeInt16(v)} }
-func Int32(v int32) XValue  { return XValue{kind: "int32", raw: encodeInt32(v)} }
-func Int64(v int64) XValue  { return XValue{kind: "int64", raw: encodeInt64(v)} }
+func Int8(v int8) XValue   { return XValue{kind: "int8", arraylength: 1, raw: encodeInt8(v)} }
+func Int16(v int16) XValue  { return XValue{kind: "int16", arraylength: 1, raw: encodeInt16(v)} }
+func Int32(v int32) XValue  { return XValue{kind: "int32", arraylength: 1, raw: encodeInt32(v)} }
+func Int64(v int64) XValue  { return XValue{kind: "int64", arraylength: 1, raw: encodeInt64(v)} }
 func Int(v int64) XValue    { return Int64(v) } // alias
 
 // ── 无符号整型 ────────────────────────────────────────────────────────────
 
-func Uint8(v uint8) XValue   { return XValue{kind: "uint8", raw: encodeUint8(v)} }
-func Uint16(v uint16) XValue  { return XValue{kind: "uint16", raw: encodeUint16(v)} }
-func Uint32(v uint32) XValue  { return XValue{kind: "uint32", raw: encodeUint32(v)} }
-func Uint64(v uint64) XValue  { return XValue{kind: "uint64", raw: encodeUint64(v)} }
+func Uint8(v uint8) XValue   { return XValue{kind: "uint8", arraylength: 1, raw: encodeUint8(v)} }
+func Uint16(v uint16) XValue  { return XValue{kind: "uint16", arraylength: 1, raw: encodeUint16(v)} }
+func Uint32(v uint32) XValue  { return XValue{kind: "uint32", arraylength: 1, raw: encodeUint32(v)} }
+func Uint64(v uint64) XValue  { return XValue{kind: "uint64", arraylength: 1, raw: encodeUint64(v)} }
 
 // ── 浮点 ──────────────────────────────────────────────────────────────────
 
-func Float32(v float32) XValue { return XValue{kind: "float32", raw: encodeFloat32(v)} }
-func Float64(v float64) XValue { return XValue{kind: "float64", raw: encodeFloat64(v)} }
+func Float32(v float32) XValue { return XValue{kind: "float32", arraylength: 1, raw: encodeFloat32(v)} }
+func Float64(v float64) XValue { return XValue{kind: "float64", arraylength: 1, raw: encodeFloat64(v)} }
 func Float(v float64) XValue   { return Float64(v) } // alias
 
 // ── 布尔 ──────────────────────────────────────────────────────────────────
@@ -32,12 +32,12 @@ func Float(v float64) XValue   { return Float64(v) } // alias
 func Bool(v bool) XValue {
 	b := byte(0)
 	if v { b = 1 }
-	return XValue{kind: "bool", raw: []byte{b}}
+	return XValue{kind: "bool", arraylength: 1, raw: []byte{b}}
 }
 
 // Dict 返回 dict 类型标记值：写在键族 base 键上，成员是 base.名 平坦键（键族本身无容器）。
 // 非 string 值 → 成员解析走按名回退（deep-dive §10.4），成员键 = 帧感知(base).名。
-func Dict() XValue { return XValue{kind: "dict"} }
+func Dict() XValue { return XValue{kind: "dict", arraylength: 1} }
 
 // ── 整型访问器 ────────────────────────────────────────────────────────────
 

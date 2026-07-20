@@ -27,7 +27,7 @@ func Array(elems []XValue) XValue {
 		copy(raw[off:], enc)
 		off += len(enc)
 	}
-	return XValue{kind: KindArray, raw: raw}
+	return XValue{kind: KindArray, arraylength: int32(len(elems)), raw: raw}
 }
 
 // ArrayInts 构造整数 1D 数组的便捷方法。

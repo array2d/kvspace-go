@@ -11,6 +11,7 @@ import (
 //   - raw 字节由 XValue 自身 owned，不与外部缓冲区共享。
 type XValue struct {
 	kind string // vtype name
+	arraylength int32
 	raw  []byte // 类型化原始字节
 }
 
@@ -25,12 +26,27 @@ func Null() XValue { return XValue{kind: "null"} }
 // RawBytes 返回底层原始字节（任意 kind）。不拷贝，调用方不得修改。
 func (v XValue) RawBytes() []byte { return v.raw }
 
-// Raw 构造任意 vtype 的 XValue（用于第三方 vtype 扩展，如 "tensor"）。
+// Raw 构造任意 vtype 的 XValue（用于第三方 vtype 扩展，如 "tensor"、"rwir"）。
 // raw 会被复制，调用方可安全复用原缓冲区。
+// arraylength 默认=1（单值）。
 func Raw(kind string, raw []byte) XValue {
 	c := make([]byte, len(raw))
 	copy(c, raw)
-	return XValue{kind: kind, raw: c}
+	return XValue{kind: kind, arraylength: 1, raw: c}
+}
+
+// RawN 构造 arraylength=N 的 XValue（用于数组类型的 raw 值）。
+func RawN(kind string, raw []byte, n int32) XValue {
+	c := make([]byte, len(raw))
+	copy(c, raw)
+	return XValue{kind: kind, arraylength: n, raw: c}
+}
+
+// ArrayLen 返回数组长度。单值返回 1，未初始化返回 0。
+func (v XValue) ArrayLen() int32 {
+	if v.kind == "" { return 0 }
+	if v.arraylength <= 0 { return 1 }
+	return v.arraylength
 }
 
 // ── Stringer ─────────────────────────────────────────────────────────────
@@ -65,36 +81,41 @@ func (v XValue) String() string {
 
 // ── TLV 编解码 ───────────────────────────────────────────────────────────
 //
-// 格式：[1B kind_len][N B kind_name][4B raw_len LE][M B raw_value]
+// 格式：[1B kind_len][N B kind_name][4B arraylength LE][4B raw_len LE][M B raw_value]
 // IsNil() 编码为 nil（零字节）。
+// arraylength 默认=1（单值），>1 表示数组。
 
 func EncodeXValue(v XValue) []byte {
 	if v.IsNil() { return nil }
-	buf := make([]byte, 1+len(v.kind)+4+len(v.raw))
+	al := v.arraylength
+	if al <= 0 { al = 1 }
+	buf := make([]byte, 1+len(v.kind)+4+4+len(v.raw))
 	buf[0] = byte(len(v.kind))
 	copy(buf[1:], v.kind)
-	binary.LittleEndian.PutUint32(buf[1+len(v.kind):], uint32(len(v.raw)))
-	copy(buf[1+len(v.kind)+4:], v.raw)
+	binary.LittleEndian.PutUint32(buf[1+len(v.kind):], uint32(al))
+	binary.LittleEndian.PutUint32(buf[1+len(v.kind)+4:], uint32(len(v.raw)))
+	copy(buf[1+len(v.kind)+8:], v.raw)
 	return buf
 }
 
 func DecodeXValue(data []byte) XValue {
 	if len(data) == 0 { return XValue{} }
 	kindLen := int(data[0])
-	if len(data) < 1+kindLen+4 { return XValue{} }
+	if len(data) < 1+kindLen+4+4 { return XValue{} }
 	kind := string(data[1 : 1+kindLen])
 	if !isValidKind(kind) { return XValue{} }
-	rawLen := binary.LittleEndian.Uint32(data[1+kindLen : 1+kindLen+4])
-	start := 1 + kindLen + 4
+	al := int32(binary.LittleEndian.Uint32(data[1+kindLen : 1+kindLen+4]))
+	rawLen := binary.LittleEndian.Uint32(data[1+kindLen+4 : 1+kindLen+8])
+	start := 1 + kindLen + 8
 	if len(data) < start+int(rawLen) { return XValue{} }
 	raw := make([]byte, rawLen)
 	copy(raw, data[start:start+int(rawLen)])
-	return XValue{kind: kind, raw: raw}
+	return XValue{kind: kind, arraylength: al, raw: raw}
 }
 
 func EncodedXSize(v XValue) int {
 	if v.IsNil() { return 0 }
-	return 1 + len(v.kind) + 4 + len(v.raw)
+	return 1 + len(v.kind) + 4 + 4 + len(v.raw)
 }
 
 func isValidKind(s string) bool {
