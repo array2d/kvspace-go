@@ -114,7 +114,7 @@ func (v XValue) Float32() float32 {
 	return math.Float32frombits(binary.LittleEndian.Uint32(v.raw))
 }
 func (v XValue) Float64() float64 {
-	if v.kind != "float64" || len(v.raw) < 8 { return 0 }
+	if (v.kind != "float64" && v.kind != "float") || len(v.raw) < 8 { return 0 }
 	return math.Float64frombits(binary.LittleEndian.Uint64(v.raw))
 }
 func (v XValue) Float() float64 { return v.Float64() } // alias
