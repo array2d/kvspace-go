@@ -1,7 +1,7 @@
 .PHONY: build test vet clean install
 
 export GOPROXY ?= https://goproxy.cn,direct
-PREFIX        ?= /usr/local
+PREFIX        ?= ~/.local
 
 build:
 	go mod tidy
