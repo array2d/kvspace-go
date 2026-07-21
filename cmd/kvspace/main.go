@@ -131,8 +131,12 @@ func printTree(kv kvspace.KVSpace, prefix, indent string) {
 		printSlotTable(kv, prefix, indent, children)
 		return
 	}
-	for i, c := range children {
-		last := i == len(children)-1
+	slots, nonslots := splitSlots(children)
+	if len(slots) > 0 {
+		printSlotTable(kv, prefix, indent, slots)
+	}
+	for i, c := range nonslots {
+		last := i == len(nonslots)-1
 		branch := "├── "
 		if last { branch = "└── " }
 		if v, err := kv.Get(prefix+"/"+c); err == nil && !v.IsNil() {
@@ -153,6 +157,17 @@ func isSlotTable(children []string) bool {
 		}
 	}
 	return true
+}
+
+func splitSlots(children []string) (slots, nonslots []string) {
+	for _, c := range children {
+		if strings.HasPrefix(c, "[") && strings.HasSuffix(c, "]") {
+			slots = append(slots, c)
+		} else {
+			nonslots = append(nonslots, c)
+		}
+	}
+	return
 }
 
 func printSlotTable(kv kvspace.KVSpace, prefix, indent string, slots []string) {
