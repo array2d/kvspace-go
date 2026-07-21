@@ -67,10 +67,6 @@ func (v XValue) String() string {
 		return tag + ":" + strconv.FormatFloat(float64(v.Float32()), 'f', -1, 32)
 	case "float64":
 		return tag + ":" + strconv.FormatFloat(v.Float64(), 'f', -1, 64)
-	case "int":
-		return tag + ":" + strconv.FormatInt(v.Int64(), 10)
-	case "float":
-		return tag + ":" + strconv.FormatFloat(v.Float64(), 'f', -1, 64)
 	case "bool":
 		return tag + ":" + strconv.FormatBool(v.Bool())
 	case "string":

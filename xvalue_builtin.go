@@ -12,7 +12,6 @@ func Int8(v int8) XValue   { return XValue{kind: "int8", arraylength: 1, raw: en
 func Int16(v int16) XValue  { return XValue{kind: "int16", arraylength: 1, raw: encodeInt16(v)} }
 func Int32(v int32) XValue  { return XValue{kind: "int32", arraylength: 1, raw: encodeInt32(v)} }
 func Int64(v int64) XValue  { return XValue{kind: "int64", arraylength: 1, raw: encodeInt64(v)} }
-func Int(v int64) XValue    { return Int64(v) } // alias
 
 // ── 无符号整型 ────────────────────────────────────────────────────────────
 
@@ -25,7 +24,6 @@ func Uint64(v uint64) XValue  { return XValue{kind: "uint64", arraylength: 1, ra
 
 func Float32(v float32) XValue { return XValue{kind: "float32", arraylength: 1, raw: encodeFloat32(v)} }
 func Float64(v float64) XValue { return XValue{kind: "float64", arraylength: 1, raw: encodeFloat64(v)} }
-func Float(v float64) XValue   { return Float64(v) } // alias
 
 // ── 布尔 ──────────────────────────────────────────────────────────────────
 
@@ -57,7 +55,7 @@ func (v XValue) Int32() int32 {
 // 精确访问器（Int8/Int16/...）仍严格校验 kind。
 func (v XValue) Int64() int64 {
 	switch v.kind {
-	case "int", "int64":
+	case "int64":
 		if len(v.raw) < 8 { return 0 }
 		return int64(binary.LittleEndian.Uint64(v.raw))
 	case "int32":
@@ -72,8 +70,6 @@ func (v XValue) Int64() int64 {
 	}
 	return 0
 }
-func (v XValue) Int() int64 { return v.Int64() } // alias
-
 // ── 无符号整型访问器 ──────────────────────────────────────────────────────
 
 func (v XValue) Uint8() uint8 {
@@ -114,11 +110,9 @@ func (v XValue) Float32() float32 {
 	return math.Float32frombits(binary.LittleEndian.Uint32(v.raw))
 }
 func (v XValue) Float64() float64 {
-	if (v.kind != "float64" && v.kind != "float") || len(v.raw) < 8 { return 0 }
+	if v.kind != "float64" || len(v.raw) < 8 { return 0 }
 	return math.Float64frombits(binary.LittleEndian.Uint64(v.raw))
 }
-func (v XValue) Float() float64 { return v.Float64() } // alias
-
 // ── 布尔访问器 ────────────────────────────────────────────────────────────
 
 func (v XValue) Bool() bool {

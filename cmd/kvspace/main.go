@@ -221,11 +221,11 @@ func parseValue(raw string) (kvspace.XValue, error) {
 	case "int":
 		i, err := strconv.ParseInt(repr, 10, 64)
 		if err != nil { return kvspace.XValue{}, fmt.Errorf("invalid int: %q", repr) }
-		return kvspace.Int(i), nil
+		return kvspace.Int64(i), nil
 	case "float":
 		f, err := strconv.ParseFloat(repr, 64)
 		if err != nil { return kvspace.XValue{}, fmt.Errorf("invalid float: %q", repr) }
-		return kvspace.Float(f), nil
+		return kvspace.Float64(f), nil
 	case "bool":
 		switch repr {
 		case "true": return kvspace.Bool(true), nil
