@@ -8,75 +8,64 @@ import (
 	"sync"
 	"time"
 
-	goredis "github.com/redis/go-redis/v9"
 	"github.com/array2d/kvspace-go"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 func init() { kvspace.Register("redis", ConnPool) }
 
 var bg = context.Background()
 
-func Conn(dsn string) kvspace.KVSpace      { return ConnPool(dsn, 16) }
-func ConnPool(dsn string, poolSize int) kvspace.KVSpace {
-	if poolSize < 16 { poolSize = 16 }
+func Conn(dsn string) kvspace.KVSpace { return ConnPool(dsn) }
+
+func ConnPool(dsn string) kvspace.KVSpace {
+	poolSize := 16
 	return &redisImpl{
 		rdb: goredis.NewClient(&goredis.Options{
 			Addr: dsn, PoolSize: poolSize,
-			MinIdleConns: min(poolSize/4, 8),
-			PoolTimeout: 10*time.Second, ReadTimeout: 3*time.Second, WriteTimeout: 3*time.Second,
+			MinIdleConns: 4,
+			PoolTimeout:  10 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second,
 		}),
-		links: make(map[string]linkEntry),
 	}
-}
-
-type linkEntry struct {
-	checked   bool
-	target    string // simple mount: target path
-	isOverlay bool
-	upper, lower string // overlay: writable / readonly layers
 }
 
 type redisImpl struct {
 	rdb    *goredis.Client
 	linkMu sync.RWMutex
-	links  map[string]linkEntry
 }
 
 // ── KVSpace interface ──────────────────────────────────────────────────────
-
-func (r *redisImpl) Get(keys []string) []kvspace.XValue {
+func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 	result := make([]kvspace.XValue, len(keys))
 	pipe := r.rdb.Pipeline()
-	type req struct{ idx int; upper, lower string }
+	type req struct {
+		idx          int
+		upper, lower string
+	}
 	var olReqs []req
 	cmds := make([]*goredis.StringCmd, len(keys))
 	for i, k := range keys {
-		resolved := kvspace.ResolveCore(k, r.checkLink)
-		if upper, lower, ok := r.resolveOL(resolved); ok {
-			olReqs = append(olReqs, req{i, upper, lower})
-			cmds[i] = nil
-		} else {
-			cmds[i] = pipe.Get(bg, resolved)
-		}
+		fullKey := kvspace.JoinPath(prefix, k)
+		cmds[i] = pipe.Get(bg, fullKey)
 	}
-	pipe.Exec(bg)
+	err := pipe.Exec(bg)
+	if err != nil {
+		panic(err)
+	}
 	for i, cmd := range cmds {
-		if cmd == nil { continue }
-		raw, err := cmd.Bytes()
-		if err == nil { result[i] = kvspace.DecodeXValue(raw) }
-	}
-	for _, q := range olReqs {
-		raw, err := r.rdb.Get(bg, q.upper).Bytes()
-		if err != nil {
-			raw, err = r.rdb.Get(bg, q.lower).Bytes()
+		if cmd == nil {
+			continue
 		}
-		if err == nil { result[q.idx] = kvspace.DecodeXValue(raw) }
+		raw, _ := cmd.Bytes()
+		result[i] = kvspace.DecodeXValue(raw)
 	}
 	return result
 }
 
 func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
-	if len(pairs) == 0 { return nil }
+	if len(pairs) == 0 {
+		return nil
+	}
 	pipe := r.rdb.Pipeline()
 	for _, p := range pairs {
 		if strings.HasSuffix(p.Key, kvspace.PathSep) {
@@ -99,15 +88,22 @@ func (r *redisImpl) List(prefix string) []string {
 		seen := map[string]bool{}
 		var result []string
 		for _, m := range r.rdb.SMembers(bg, dirKey(upper)).Val() {
-			if strings.HasPrefix(m, kvspace.ReservedPrefix) { continue }
-			seen[m] = true; result = append(result, m)
+			if strings.HasPrefix(m, kvspace.ReservedPrefix) {
+				continue
+			}
+			seen[m] = true
+			result = append(result, m)
 		}
 		for _, m := range r.rdb.SMembers(bg, dirKey(lower)).Val() {
-			if seen[m] || strings.HasPrefix(m, kvspace.ReservedPrefix) { continue }
+			if seen[m] || strings.HasPrefix(m, kvspace.ReservedPrefix) {
+				continue
+			}
 			result = append(result, m)
 		}
 		for _, m := range r.rdb.SMembers(bg, dirKey(resolved)).Val() {
-			if seen[m] || strings.HasPrefix(m, kvspace.ReservedPrefix) { continue }
+			if seen[m] || strings.HasPrefix(m, kvspace.ReservedPrefix) {
+				continue
+			}
 			result = append(result, m)
 		}
 		return result
@@ -122,15 +118,21 @@ func (r *redisImpl) Del(keys ...string) error {
 	}
 	err := r.rdb.Del(bg, resolved...).Err()
 	r.linkMu.Lock()
-	for _, k := range resolved { r.links[k] = linkEntry{checked: true, target: ""} }
+	for _, k := range resolved {
+		r.links[k] = linkEntry{checked: true, target: ""}
+	}
 	r.linkMu.Unlock()
-	for _, k := range resolved { r.delIndex(k) }
+	for _, k := range resolved {
+		r.delIndex(k)
+	}
 	return err
 }
 
 func (r *redisImpl) DelTree(prefix string) error {
 	resolved := kvspace.ResolveParent(prefix, r.checkLink)
-	if r.checkLink(resolved) != "" { return r.Unlink(resolved) }
+	if r.checkLink(resolved) != "" {
+		return r.Unlink(resolved)
+	}
 	r.delRecursive(resolved)
 	r.delIndex(resolved)
 	return nil
@@ -138,7 +140,9 @@ func (r *redisImpl) DelTree(prefix string) error {
 
 func (r *redisImpl) Watch(key string, timeout time.Duration) kvspace.XValue {
 	vals, err := r.rdb.BLPop(bg, timeout, kvspace.ResolveCore(key, r.checkLink)).Result()
-	if err != nil || len(vals) < 2 { return kvspace.XValue{} }
+	if err != nil || len(vals) < 2 {
+		return kvspace.XValue{}
+	}
 	return kvspace.DecodeXValue([]byte(vals[1]))
 }
 
@@ -152,17 +156,20 @@ func (r *redisImpl) Mount(target, linkpath string) error { return r.Link(target,
 
 func (r *redisImpl) Overlay(merge, lower, upper string) error {
 	val := kvspace.NewOverlayValue(upper, lower)
-	if err := r.rdb.Set(bg, merge, kvspace.EncodeXValue(val), 0).Err(); err != nil { return err }
-	r.addIndex(merge)
-	r.linkMu.Lock()
-	r.links[merge] = linkEntry{checked: true, isOverlay: true, upper: upper, lower: lower}
-	r.linkMu.Unlock()
+	if err := r.Set([]kvspace.KVPair{
+		{merge, val},
+	}); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (r *redisImpl) UnMount(linkpath string) error {
-	e := r.checkLinkEntry(linkpath)
-	if e.isOverlay { r.delRecursive(e.upper); r.delIndex(e.upper) }
+
+	if e.isOverlay {
+		r.delRecursive(e.upper)
+		r.delIndex(e.upper)
+	}
 	return r.Unlink(linkpath)
 }
 
@@ -172,23 +179,13 @@ func (r *redisImpl) DisConn() error { return r.rdb.Close() }
 // ── soft links (internal, used by Mount/UnMount) ──────────────────────────
 
 func (r *redisImpl) Link(target, linkpath string) error {
+	prefix, link := kvspace.SepPath(linkpath)
+	r.Get(prefix, []string{link})
 	val := kvspace.NewMountValue(target)
 	if err := r.rdb.Set(bg, linkpath, kvspace.EncodeXValue(val), 0).Err(); err != nil {
 		return err
 	}
 	r.addIndex(linkpath)
-	r.linkMu.Lock()
-	r.links[linkpath] = linkEntry{checked: true, target: target}
-	r.linkMu.Unlock()
-	return nil
-}
-
-func (r *redisImpl) Unlink(linkpath string) error {
-	if err := r.rdb.Del(bg, linkpath).Err(); err != nil { return err }
-	r.delIndex(linkpath)
-	r.linkMu.Lock()
-	r.links[linkpath] = linkEntry{checked: true, target: ""}
-	r.linkMu.Unlock()
 	return nil
 }
 
@@ -200,7 +197,9 @@ func (r *redisImpl) checkLinkEntry(path string) linkEntry {
 	r.linkMu.RLock()
 	e := r.links[path]
 	r.linkMu.RUnlock()
-	if e.checked { return e }
+	if e.checked {
+		return e
+	}
 	raw, _ := r.rdb.Get(bg, path).Bytes()
 	v := kvspace.DecodeXValue(raw)
 	switch {
@@ -221,23 +220,11 @@ func (r *redisImpl) checkLinkEntry(path string) linkEntry {
 	return e
 }
 
-// resolveOL 返回路径的 overlay 信息（最深层祖先），无 overlay 返回 nil。
-// 跳过保留字段（ReservedPrefix 开头），避免 .upper/.rootfunc 等被 overlay 拦截。
-func (r *redisImpl) resolveOL(path string) (upperPrefix, lowerPrefix string, ok bool) {
-	for i := len(path); i > 0; i = strings.LastIndexByte(path[:i], '/') {
-		if i == 0 { break }
-		if e := r.checkLinkEntry(path[:i]); e.isOverlay {
-			suffix := path[i:]
-			if strings.HasPrefix(suffix, kvspace.PathSep+kvspace.ReservedPrefix) { continue }
-			return e.upper + suffix, e.lower + suffix, true
-		}
-	}
-	return "", "", false
-}
-
 // dirKey 返回目录索引键：parent 为 / 时返回 /，否则返回 parent/
 func dirKey(parent string) string {
-	if parent == kvspace.PathSep { return kvspace.PathSep }
+	if parent == kvspace.PathSep {
+		return kvspace.PathSep
+	}
 	return parent + kvspace.DirIndexSuf
 }
 
@@ -245,16 +232,22 @@ func dirKey(parent string) string {
 
 func (r *redisImpl) delRecursive(prefix string) {
 	children, _ := r.rdb.SMembers(bg, dirKey(prefix)).Result()
-	for _, c := range children { r.delRecursive(kvspace.JoinPath(prefix, c)) }
+	for _, c := range children {
+		r.delRecursive(kvspace.JoinPath(prefix, c))
+	}
 	r.rdb.Del(bg, prefix, dirKey(prefix))
 }
 
 func (r *redisImpl) addIndex(key string) {
 	prefix := ""
 	for _, p := range strings.Split(key, kvspace.PathSep)[1:] {
-		if p == "" { break }
+		if p == "" {
+			break
+		}
 		parent := prefix
-		if parent == "" { parent = kvspace.PathSep }
+		if parent == "" {
+			parent = kvspace.PathSep
+		}
 		r.rdb.SAdd(bg, dirKey(parent), p)
 		prefix += kvspace.PathSep + p
 	}
@@ -262,15 +255,25 @@ func (r *redisImpl) addIndex(key string) {
 
 func (r *redisImpl) delIndex(key string) {
 	for key != "" && key != kvspace.PathSep {
-		if n, _ := r.rdb.SCard(bg, dirKey(key)).Result(); n > 0 { return }
+		if n, _ := r.rdb.SCard(bg, dirKey(key)).Result(); n > 0 {
+			return
+		}
 		slash := strings.LastIndexByte(key, '/')
-		if slash < 0 { return }
+		if slash < 0 {
+			return
+		}
 		parent := key[:slash]
 		idxParent := parent
-		if idxParent == "" { idxParent = kvspace.PathSep }
+		if idxParent == "" {
+			idxParent = kvspace.PathSep
+		}
 		r.rdb.SRem(bg, dirKey(idxParent), key[slash+1:])
-		if parent == "" { return }
-		if exists, _ := r.rdb.Exists(bg, parent).Result(); exists > 0 { return }
+		if parent == "" {
+			return
+		}
+		if exists, _ := r.rdb.Exists(bg, parent).Result(); exists > 0 {
+			return
+		}
 		key = parent
 	}
 }
@@ -278,14 +281,14 @@ func (r *redisImpl) delIndex(key string) {
 func pipeIndex(pipe goredis.Pipeliner, key string) {
 	prefix := ""
 	for _, p := range strings.Split(key, kvspace.PathSep)[1:] {
-		if p == "" { break }
+		if p == "" {
+			break
+		}
 		parent := prefix
-		if parent == "" { parent = kvspace.PathSep }
+		if parent == "" {
+			parent = kvspace.PathSep
+		}
 		pipe.SAdd(bg, dirKey(parent), p)
 		prefix += kvspace.PathSep + p
 	}
 }
-
-// Go 1.21+ builtin, keep for compat
-func min(a, b int) int { if a < b { return a }; return b }
-
