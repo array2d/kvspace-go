@@ -22,7 +22,7 @@ func main() {
 	dsn := fs.String("kvspace", defaultKVSpace(), "kvspace DSN (redis://host:port)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvspace [--kvspace dsn] <subcommand> [args]")
-		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mount unmount list tree dump watch notify clear")
+		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mount unmount overlay list tree dump watch notify clear")
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[1:])
@@ -57,6 +57,9 @@ func main() {
 	case "unmount":
 		if len(sub) < 2 { exitUsage("kvspace unmount <linkpath>") }
 		if err := kv.UnMount(sub[1]); err != nil { fatalf("%v", err) }
+	case "overlay":
+		if len(sub) < 4 { exitUsage("kvspace overlay <merge> <lower> <upper>") }
+		if err := kv.Overlay(sub[1], sub[2], sub[3]); err != nil { fatalf("%v", err) }
 	case "list":
 		if len(sub) < 2 { exitUsage("kvspace list <prefix>") }
 		for _, c := range kv.List(sub[1]) { fmt.Println(c) }
