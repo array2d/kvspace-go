@@ -8,34 +8,34 @@ import (
 // ── 整型构造函数 ─────────────────────────────────────────────────────────
 // 小端编码，固定宽度
 
-func Int8(v int8) XValue   { return XValue{kind: "int8", arraylength: 1, raw: encodeInt8(v)} }
-func Int16(v int16) XValue  { return XValue{kind: "int16", arraylength: 1, raw: encodeInt16(v)} }
-func Int32(v int32) XValue  { return XValue{kind: "int32", arraylength: 1, raw: encodeInt32(v)} }
-func Int64(v int64) XValue  { return XValue{kind: "int64", arraylength: 1, raw: encodeInt64(v)} }
+func Int8(v int8) XValue   { return XValue{kind: KindInt8, arraylength: 1, raw: encodeInt8(v)} }
+func Int16(v int16) XValue  { return XValue{kind: KindInt16, arraylength: 1, raw: encodeInt16(v)} }
+func Int32(v int32) XValue  { return XValue{kind: KindInt32, arraylength: 1, raw: encodeInt32(v)} }
+func Int64(v int64) XValue  { return XValue{kind: KindInt64, arraylength: 1, raw: encodeInt64(v)} }
 
 // ── 无符号整型 ────────────────────────────────────────────────────────────
 
-func Uint8(v uint8) XValue   { return XValue{kind: "uint8", arraylength: 1, raw: encodeUint8(v)} }
-func Uint16(v uint16) XValue  { return XValue{kind: "uint16", arraylength: 1, raw: encodeUint16(v)} }
-func Uint32(v uint32) XValue  { return XValue{kind: "uint32", arraylength: 1, raw: encodeUint32(v)} }
-func Uint64(v uint64) XValue  { return XValue{kind: "uint64", arraylength: 1, raw: encodeUint64(v)} }
+func Uint8(v uint8) XValue   { return XValue{kind: KindUint8, arraylength: 1, raw: encodeUint8(v)} }
+func Uint16(v uint16) XValue  { return XValue{kind: KindUint16, arraylength: 1, raw: encodeUint16(v)} }
+func Uint32(v uint32) XValue  { return XValue{kind: KindUint32, arraylength: 1, raw: encodeUint32(v)} }
+func Uint64(v uint64) XValue  { return XValue{kind: KindUint64, arraylength: 1, raw: encodeUint64(v)} }
 
 // ── 浮点 ──────────────────────────────────────────────────────────────────
 
-func Float32(v float32) XValue { return XValue{kind: "float32", arraylength: 1, raw: encodeFloat32(v)} }
-func Float64(v float64) XValue { return XValue{kind: "float64", arraylength: 1, raw: encodeFloat64(v)} }
+func Float32(v float32) XValue { return XValue{kind: KindFloat32, arraylength: 1, raw: encodeFloat32(v)} }
+func Float64(v float64) XValue { return XValue{kind: KindFloat64, arraylength: 1, raw: encodeFloat64(v)} }
 
 // ── 布尔 ──────────────────────────────────────────────────────────────────
 
 func Bool(v bool) XValue {
 	b := byte(0)
 	if v { b = 1 }
-	return XValue{kind: "bool", arraylength: 1, raw: []byte{b}}
+	return XValue{kind: KindBool, arraylength: 1, raw: []byte{b}}
 }
 
 // Dict 返回 dict 类型标记值：写在键族 base 键上，成员是 base.名 平坦键（键族本身无容器）。
 // 非 string 值 → 成员解析走按名回退（deep-dive §10.4），成员键 = 帧感知(base).名。
-func Dict() XValue { return XValue{kind: "dict", arraylength: 1} }
+func Dict() XValue { return XValue{kind: KindDict, arraylength: 1} }
 
 // Time 返回 Unix 纳秒时间戳（kind="time"，8B LE）。
 func Time(unixNano int64) XValue { return XValue{kind: "time", arraylength: 1, raw: encodeInt64(unixNano)} }
@@ -49,31 +49,31 @@ func (v XValue) TimeNs() int64 {
 // ── 整型访问器 ────────────────────────────────────────────────────────────
 
 func (v XValue) Int8() int8 {
-	if v.kind != "int8" || len(v.raw) < 1 { return 0 }
+	if v.kind != KindInt8 || len(v.raw) < 1 { return 0 }
 	return int8(v.raw[0])
 }
 func (v XValue) Int16() int16 {
-	if v.kind != "int16" || len(v.raw) < 2 { return 0 }
+	if v.kind != KindInt16 || len(v.raw) < 2 { return 0 }
 	return int16(binary.LittleEndian.Uint16(v.raw))
 }
 func (v XValue) Int32() int32 {
-	if v.kind != "int32" || len(v.raw) < 4 { return 0 }
+	if v.kind != KindInt32 || len(v.raw) < 4 { return 0 }
 	return int32(binary.LittleEndian.Uint32(v.raw))
 }
 // Int64 宽容整型读取器（对标 Go reflect.Value.Int）：按 kind 实际宽度解码，窄类型符号扩展。
 // 精确访问器（Int8/Int16/...）仍严格校验 kind。
 func (v XValue) Int64() int64 {
 	switch v.kind {
-	case "int64":
+	case KindInt64:
 		if len(v.raw) < 8 { return 0 }
 		return int64(binary.LittleEndian.Uint64(v.raw))
-	case "int32":
+	case KindInt32:
 		if len(v.raw) < 4 { return 0 }
 		return int64(int32(binary.LittleEndian.Uint32(v.raw)))
-	case "int16":
+	case KindInt16:
 		if len(v.raw) < 2 { return 0 }
 		return int64(int16(binary.LittleEndian.Uint16(v.raw)))
-	case "int8":
+	case KindInt8:
 		if len(v.raw) < 1 { return 0 }
 		return int64(int8(v.raw[0]))
 	}
@@ -82,30 +82,30 @@ func (v XValue) Int64() int64 {
 // ── 无符号整型访问器 ──────────────────────────────────────────────────────
 
 func (v XValue) Uint8() uint8 {
-	if v.kind != "uint8" || len(v.raw) < 1 { return 0 }
+	if v.kind != KindUint8 || len(v.raw) < 1 { return 0 }
 	return v.raw[0]
 }
 func (v XValue) Uint16() uint16 {
-	if v.kind != "uint16" || len(v.raw) < 2 { return 0 }
+	if v.kind != KindUint16 || len(v.raw) < 2 { return 0 }
 	return binary.LittleEndian.Uint16(v.raw)
 }
 func (v XValue) Uint32() uint32 {
-	if v.kind != "uint32" || len(v.raw) < 4 { return 0 }
+	if v.kind != KindUint32 || len(v.raw) < 4 { return 0 }
 	return binary.LittleEndian.Uint32(v.raw)
 }
 // Uint64 宽容无符号读取器：按 kind 实际宽度解码（对标 Go reflect.Value.Uint）。
 func (v XValue) Uint64() uint64 {
 	switch v.kind {
-	case "uint64":
+	case KindUint64:
 		if len(v.raw) < 8 { return 0 }
 		return binary.LittleEndian.Uint64(v.raw)
-	case "uint32":
+	case KindUint32:
 		if len(v.raw) < 4 { return 0 }
 		return uint64(binary.LittleEndian.Uint32(v.raw))
-	case "uint16":
+	case KindUint16:
 		if len(v.raw) < 2 { return 0 }
 		return uint64(binary.LittleEndian.Uint16(v.raw))
-	case "uint8":
+	case KindUint8:
 		if len(v.raw) < 1 { return 0 }
 		return uint64(v.raw[0])
 	}
@@ -115,17 +115,17 @@ func (v XValue) Uint64() uint64 {
 // ── 浮点访问器 ────────────────────────────────────────────────────────────
 
 func (v XValue) Float32() float32 {
-	if v.kind != "float32" || len(v.raw) < 4 { return 0 }
+	if v.kind != KindFloat32 || len(v.raw) < 4 { return 0 }
 	return math.Float32frombits(binary.LittleEndian.Uint32(v.raw))
 }
 func (v XValue) Float64() float64 {
-	if v.kind != "float64" || len(v.raw) < 8 { return 0 }
+	if v.kind != KindFloat64 || len(v.raw) < 8 { return 0 }
 	return math.Float64frombits(binary.LittleEndian.Uint64(v.raw))
 }
 // ── 布尔访问器 ────────────────────────────────────────────────────────────
 
 func (v XValue) Bool() bool {
-	if v.kind != "bool" || len(v.raw) == 0 { return false }
+	if v.kind != KindBool || len(v.raw) == 0 { return false }
 	return v.raw[0] != 0
 }
 

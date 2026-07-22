@@ -28,41 +28,43 @@ type KVPair struct {
 // 不穿透 target；路径中的祖先链接仍穿透（Del("/alias/x") 删 /real/x）。
 type KVSpace interface {
 	// ── 单点读写 ─────────────────────────────────────────────────────────
-	Get(key string) (XValue, error)   // key 不存在返回 (Value{}, ErrNotFound)
-	Set(key string, val XValue) error // 写入并维护目录索引
-	Del(keys ...string) error        // 精确删除（含索引清理）
-
-	// ── 批量读写 ─────────────────────────────────────────────────────────
-	GetMany(keys []string) ([]XValue, error) // 缺失位置返回 Value{}，不返回 error
-	MSet(pairs []KVPair) error           // 批量写入
+	Get(keys []string) ([]XValue )//缺失返回 xvalue（kind=null）
+	Set(pairs []KVPair) error // 写入并维护目录索引,pre路径如果不存在，则汇报异常
 
 	// ── 目录操作 ─────────────────────────────────────────────────────────
-	List(prefix string) ([]string, error) // 列出直接子项名
+	List(prefix string) ([]string )// 列出直接子项名
+	Del(keys ...string) error// 精确删除（含索引清理）
 	DelTree(prefix string) error          // 递归删除；prefix 本身是链接则只删链接
 
 	// ── 变更通知 ─────────────────────────────────────────────────────────
 	Notify(key string, val XValue) error                    // 投递一次性通知信号
-	Watch(key string, timeout time.Duration) (XValue, error) // 阻塞等待通知
+	Watch(key string, timeout time.Duration) (XValue ) // 阻塞等待通知
 
-	// ── 软链接 ───────────────────────────────────────────────────────────
-	Link(target, linkpath string) error // 创建软链接：linkpath → target
-	Unlink(linkpath string) error       // 删除链接本身（不影响 target）
+	// ── mount系统 ───────────────────────────────────────────────────────────
+	Mount(target, linkpath string) error // 创建路径映射linkpath → target
+	Overlay(target, r,w string) error // 创建overlay,访问target/，先访问最上层w/，不存则则再后续访问r/
+	UnMount(linkpath string) error       // 删除链接linkpath
 
 	// ── 生命周期 ─────────────────────────────────────────────────────────
-	// ClearAll 清空整个后端命名空间（fix-019 契约第 13 方法）。
 	// 范围警示：redis 实现 = FLUSHDB，清空所在 db 的全部键——共享 Redis 实例时会波及非 kvlang 数据。
-	ClearAll() error
+	Clear() error
 	DisConn() error
+}
+
+// JoinPath 连接父路径与子名，避免根路径产生 //。
+func JoinPath(parent, child string) string {
+	if parent == PathSep { return PathSep + child }
+	return parent + PathSep + child
 }
 
 // Walk 递归遍历 prefix 下的 KV 树，对每个节点调用 fn(path, value)。
 // 节点无值时 value 为 nil；遍历顺序为深度优先。
 func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
-	if v, err := kv.Get(prefix); err == nil && !v.IsNil() {
-		fn(prefix, v)
+	vals := kv.Get([]string{prefix})
+	if len(vals) > 0 && !vals[0].IsNil() {
+		fn(prefix, vals[0])
 	}
-	children, _ := kv.List(prefix)
-	for _, c := range children {
-		Walk(kv, prefix+"/"+c, fn)
+	for _, c := range kv.List(prefix) {
+		Walk(kv, JoinPath(prefix, c), fn)
 	}
 }

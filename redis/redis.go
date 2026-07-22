@@ -3,7 +3,7 @@ package redis
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -12,46 +12,26 @@ import (
 	"github.com/array2d/kvspace-go"
 )
 
-func init() {
-	kvspace.Register("redis", ConnPool)
-}
+func init() { kvspace.Register("redis", ConnPool) }
 
 var bg = context.Background()
 
-// linkSentinel 软链接存储前缀：value 以 "->" 开头表示链接目标。
 const linkSentinel = "->"
 
-// Conn 使用默认连接池（poolSize=16）创建 KVSpace。
-func Conn(dsn string) kvspace.KVSpace { return ConnPool(dsn, 16) }
-
-// ConnPool 创建带自定义连接池的 KVSpace。
-// serve 模式建议 poolSize = workers+16。
+func Conn(dsn string) kvspace.KVSpace      { return ConnPool(dsn, 16) }
 func ConnPool(dsn string, poolSize int) kvspace.KVSpace {
-	if poolSize < 16 {
-		poolSize = 16
-	}
+	if poolSize < 16 { poolSize = 16 }
 	return &redisImpl{
 		rdb: goredis.NewClient(&goredis.Options{
-			Addr:         dsn,
-			PoolSize:     poolSize,
+			Addr: dsn, PoolSize: poolSize,
 			MinIdleConns: min(poolSize/4, 8),
-			PoolTimeout:  10 * time.Second,
-			ReadTimeout:  3 * time.Second,
-			WriteTimeout: 3 * time.Second,
+			PoolTimeout: 10*time.Second, ReadTimeout: 3*time.Second, WriteTimeout: 3*time.Second,
 		}),
 		links: make(map[string]linkEntry),
 	}
 }
 
-// linkEntry 记录路径的链接检查结果。
-//
-//	{checked:false}         零值，尚未检查（lazy GET）
-//	{checked:true, target:""}   确认非链接（否定缓存）
-//	{checked:true, target:"x"}  链接，目标路径为 "x"
-type linkEntry struct {
-	checked bool
-	target  string
-}
+type linkEntry struct{ checked bool; target string }
 
 type redisImpl struct {
 	rdb    *goredis.Client
@@ -59,7 +39,87 @@ type redisImpl struct {
 	links  map[string]linkEntry
 }
 
-// ── 软链接 ───────────────────────────────────────────────────────────────────
+// ── KVSpace interface ──────────────────────────────────────────────────────
+
+func (r *redisImpl) Get(keys []string) []kvspace.XValue {
+	result := make([]kvspace.XValue, len(keys))
+	pipe := r.rdb.Pipeline()
+	cmds := make([]*goredis.StringCmd, len(keys))
+	for i, k := range keys {
+		cmds[i] = pipe.Get(bg, kvspace.ResolveCore(k, r.checkLink))
+	}
+	pipe.Exec(bg)
+	for i, cmd := range cmds {
+		raw, err := cmd.Bytes()
+		if err == nil { result[i] = kvspace.DecodeXValue(raw) }
+	}
+	return result
+}
+
+func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
+	if len(pairs) == 0 { return nil }
+	pipe := r.rdb.Pipeline()
+	for _, p := range pairs {
+		if strings.HasSuffix(p.Key, kvspace.PathSep) {
+			return fmt.Errorf("kvspace: key must not end with %s: %s", kvspace.PathSep, p.Key)
+		}
+		resolved := kvspace.ResolveCore(p.Key, r.checkLink)
+		pipeIndex(pipe, resolved)
+		pipe.Set(bg, resolved, kvspace.EncodeXValue(p.Val), 0)
+	}
+	_, err := pipe.Exec(bg)
+	return err
+}
+
+func (r *redisImpl) List(prefix string) []string {
+	resolved := kvspace.ResolveCore(prefix, r.checkLink)
+	members, _ := r.rdb.SMembers(bg, dirKey(resolved)).Result()
+	return members
+}
+
+func (r *redisImpl) Del(keys ...string) error {
+	resolved := make([]string, len(keys))
+	for i, k := range keys {
+		resolved[i] = kvspace.ResolveParent(k, r.checkLink)
+	}
+	err := r.rdb.Del(bg, resolved...).Err()
+	r.linkMu.Lock()
+	for _, k := range resolved { r.links[k] = linkEntry{checked: true, target: ""} }
+	r.linkMu.Unlock()
+	for _, k := range resolved { r.delIndex(k) }
+	return err
+}
+
+func (r *redisImpl) DelTree(prefix string) error {
+	resolved := kvspace.ResolveParent(prefix, r.checkLink)
+	if r.checkLink(resolved) != "" { return r.Unlink(resolved) }
+	r.delRecursive(resolved)
+	r.delIndex(resolved)
+	return nil
+}
+
+func (r *redisImpl) Watch(key string, timeout time.Duration) kvspace.XValue {
+	vals, err := r.rdb.BLPop(bg, timeout, kvspace.ResolveCore(key, r.checkLink)).Result()
+	if err != nil || len(vals) < 2 { return kvspace.XValue{} }
+	return kvspace.DecodeXValue([]byte(vals[1]))
+}
+
+func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
+	return r.rdb.LPush(bg, kvspace.ResolveCore(key, r.checkLink), kvspace.EncodeXValue(val)).Err()
+}
+
+// ── mount ─────────────────────────────────────────────────────────────────
+
+func (r *redisImpl) Mount(target, linkpath string) error { return r.Link(target, linkpath) }
+func (r *redisImpl) Overlay(target, rPath, wPath string) error {
+	return fmt.Errorf("overlay not implemented")
+}
+func (r *redisImpl) UnMount(linkpath string) error { return r.Unlink(linkpath) }
+
+func (r *redisImpl) Clear() error   { return r.rdb.FlushDB(bg).Err() }
+func (r *redisImpl) DisConn() error { return r.rdb.Close() }
+
+// ── soft links (internal, used by Mount/UnMount) ──────────────────────────
 
 func (r *redisImpl) Link(target, linkpath string) error {
 	if err := r.rdb.Set(bg, linkpath, []byte(linkSentinel+target), 0).Err(); err != nil {
@@ -73,216 +133,79 @@ func (r *redisImpl) Link(target, linkpath string) error {
 }
 
 func (r *redisImpl) Unlink(linkpath string) error {
-	if err := r.rdb.Del(bg, linkpath).Err(); err != nil {
-		return err
-	}
+	if err := r.rdb.Del(bg, linkpath).Err(); err != nil { return err }
 	r.delIndex(linkpath)
 	r.linkMu.Lock()
-	r.links[linkpath] = linkEntry{checked: true, target: ""} // 确认非链接
+	r.links[linkpath] = linkEntry{checked: true, target: ""}
 	r.linkMu.Unlock()
 	return nil
 }
 
-// checkLink 返回 path 的链接目标；非链接或未知时返回 ""。
-// 结果缓存在 linkEntry 中，已检查的路径不再访问 Redis。
 func (r *redisImpl) checkLink(path string) string {
 	r.linkMu.RLock()
-	e := r.links[path] // 零值 {checked:false} 表示未检查
+	e := r.links[path]
 	r.linkMu.RUnlock()
-	if e.checked {
-		return e.target
-	}
-	// 未检查：向 Redis 查询
+	if e.checked { return e.target }
 	var target string
 	raw, _ := r.rdb.Get(bg, path).Bytes()
-	if len(raw) >= 2 && raw[0] == '-' && raw[1] == '>' {
-		target = string(raw[2:])
-	}
+	if len(raw) >= 2 && raw[0] == '-' && raw[1] == '>' { target = string(raw[2:]) }
 	r.linkMu.Lock()
 	r.links[path] = linkEntry{checked: true, target: target}
 	r.linkMu.Unlock()
 	return target
 }
 
-// ── CRUD ─────────────────────────────────────────────────────────────────────
-
-func (r *redisImpl) Get(key string) (kvspace.XValue, error) {
-	raw, err := r.rdb.Get(bg, kvspace.ResolveCore(key, r.checkLink)).Bytes()
-	if err != nil {
-		if errors.Is(err, goredis.Nil) {
-			return kvspace.XValue{}, kvspace.ErrNotFound
-		}
-		return kvspace.XValue{}, err
-	}
-	return kvspace.DecodeXValue(raw), nil
+// dirKey 返回目录索引键：parent 为 / 时返回 /，否则返回 parent/
+func dirKey(parent string) string {
+	if parent == kvspace.PathSep { return kvspace.PathSep }
+	return parent + kvspace.DirIndexSuf
 }
 
-func (r *redisImpl) GetMany(keys []string) ([]kvspace.XValue, error) {
-	resolved := make([]string, len(keys))
-	for i, k := range keys {
-		resolved[i] = kvspace.ResolveCore(k, r.checkLink)
-	}
-	raw, err := r.rdb.MGet(bg, resolved...).Result()
-	if err != nil {
-		return nil, err
-	}
-	result := make([]kvspace.XValue, len(raw))
-	for i, v := range raw {
-		if v != nil {
-			result[i] = kvspace.DecodeXValue([]byte(v.(string)))
-		}
-	}
-	return result, nil
-}
-
-func (r *redisImpl) Set(key string, val kvspace.XValue) error {
-	resolved := kvspace.ResolveCore(key, r.checkLink)
-	r.addIndex(resolved)
-	return r.rdb.Set(bg, resolved, kvspace.EncodeXValue(val), 0).Err()
-}
-
-// MSet 使用 pipeline 批量写入，N 对 key 的索引维护合并为单次 round trip。
-func (r *redisImpl) MSet(pairs []kvspace.KVPair) error {
-	if len(pairs) == 0 {
-		return nil
-	}
-	pipe := r.rdb.Pipeline()
-	msetArgs := make([]any, 0, len(pairs)*2)
-	for _, p := range pairs {
-		resolved := kvspace.ResolveCore(p.Key, r.checkLink)
-		pipeIndex(pipe, resolved)
-		msetArgs = append(msetArgs, resolved, kvspace.EncodeXValue(p.Val))
-	}
-	pipe.MSet(bg, msetArgs...)
-	_, err := pipe.Exec(bg)
-	return err
-}
-
-func (r *redisImpl) Del(keys ...string) error {
-	resolved := make([]string, len(keys))
-	for i, k := range keys {
-		// 末段不穿透链接：Del 作用于链接本体（fix-014，POSIX rm 语义）
-		resolved[i] = kvspace.ResolveParent(k, r.checkLink)
-	}
-	err := r.rdb.Del(bg, resolved...).Err()
-	r.linkMu.Lock()
-	for _, k := range resolved {
-		r.links[k] = linkEntry{checked: true, target: ""} // 键已删，失效链接缓存
-	}
-	r.linkMu.Unlock()
-	for _, k := range resolved {
-		r.delIndex(k)
-	}
-	return err
-}
-
-func (r *redisImpl) DelTree(prefix string) error {
-	// 祖先穿透、末段本体：嵌套于链接下的路径也能正确定位链接自身（fix-014）
-	resolved := kvspace.ResolveParent(prefix, r.checkLink)
-	if r.checkLink(resolved) != "" {
-		return r.Unlink(resolved) // 链接只删链接，不动 target 树
-	}
-	r.delRecursive(resolved)
-	r.delIndex(resolved)
-	return nil
-}
-
-func (r *redisImpl) List(prefix string) ([]string, error) {
-	return r.rdb.SMembers(bg, kvspace.ResolveCore(prefix, r.checkLink)+"/.").Result()
-}
-
-func (r *redisImpl) Watch(key string, timeout time.Duration) (kvspace.XValue, error) {
-	vals, err := r.rdb.BLPop(bg, timeout, kvspace.ResolveCore(key, r.checkLink)).Result()
-	if err != nil {
-		if errors.Is(err, goredis.Nil) {
-			return kvspace.XValue{}, kvspace.ErrNotFound
-		}
-		return kvspace.XValue{}, err
-	}
-	if len(vals) < 2 {
-		return kvspace.XValue{}, kvspace.ErrNotFound
-	}
-	return kvspace.DecodeXValue([]byte(vals[1])), nil
-}
-
-func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
-	return r.rdb.LPush(bg, kvspace.ResolveCore(key, r.checkLink), kvspace.EncodeXValue(val)).Err()
-}
-
-func (r *redisImpl) ClearAll() error { return r.rdb.FlushDB(bg).Err() }
-func (r *redisImpl) DisConn() error   { return r.rdb.Close() }
-
-// ── 内部工具 ──────────────────────────────────────────────────────────────────
+// ── index maintenance ─────────────────────────────────────────────────────
 
 func (r *redisImpl) delRecursive(prefix string) {
-	children, _ := r.rdb.SMembers(bg, prefix+"/.").Result()
-	for _, c := range children {
-		r.delRecursive(prefix + "/" + c)
-	}
-	r.rdb.Del(bg, prefix, prefix+"/.")
+	children, _ := r.rdb.SMembers(bg, dirKey(prefix)).Result()
+	for _, c := range children { r.delRecursive(kvspace.JoinPath(prefix, c)) }
+	r.rdb.Del(bg, prefix, dirKey(prefix))
 }
 
-// addIndex 写入 key 后维护层级索引（每级一次 SADD，幂等）。
 func (r *redisImpl) addIndex(key string) {
 	prefix := ""
-	for _, p := range strings.Split(key, "/")[1:] {
-		if p == "" || p == "." {
-			break
-		}
+	for _, p := range strings.Split(key, kvspace.PathSep)[1:] {
+		if p == "" { break }
 		parent := prefix
-		if parent == "" {
-			parent = "/"
-		}
-		r.rdb.SAdd(bg, parent+"/.", p)
-		prefix += "/" + p
+		if parent == "" { parent = kvspace.PathSep }
+		r.rdb.SAdd(bg, dirKey(parent), p)
+		prefix += kvspace.PathSep + p
 	}
 }
 
-// delIndex 删除 key 后维护目录索引，保持不变量：
-//
-//	p ∈ parent/.  ⟺  parent/p 有值 或 parent/p/. 非空
-//
-// 仅当 key 已无子项时才从直接父索引摘除；随后沿祖先级联，
-// 清理"既无值又无子项"的空目录（含历史残留的幽灵项，自愈）。
-// 旧实现沿全路径无条件 SREM，会把仍有兄弟/子孙的祖先从索引中误清（fix-013）。
 func (r *redisImpl) delIndex(key string) {
-	for key != "" && key != "/" {
-		if n, _ := r.rdb.SCard(bg, key+"/.").Result(); n > 0 {
-			return // key 仍是非空目录，保留于父索引
-		}
+	for key != "" && key != kvspace.PathSep {
+		if n, _ := r.rdb.SCard(bg, dirKey(key)).Result(); n > 0 { return }
 		slash := strings.LastIndexByte(key, '/')
-		if slash < 0 {
-			return
-		}
+		if slash < 0 { return }
 		parent := key[:slash]
-		indexParent := parent
-		if indexParent == "" {
-			indexParent = "/"
-		}
-		r.rdb.SRem(bg, indexParent+"/.", key[slash+1:])
-		if parent == "" {
-			return // 已到根
-		}
-		if exists, _ := r.rdb.Exists(bg, parent).Result(); exists > 0 {
-			return // 父级自身有值，仍应列于祖父索引
-		}
+		idxParent := parent
+		if idxParent == "" { idxParent = kvspace.PathSep }
+		r.rdb.SRem(bg, dirKey(idxParent), key[slash+1:])
+		if parent == "" { return }
+		if exists, _ := r.rdb.Exists(bg, parent).Result(); exists > 0 { return }
 		key = parent
 	}
 }
 
-// pipeIndex 向 pipeline 追加该 key 的全部层级 SADD 索引命令（addIndex 的批量版）。
-// 供 MSet 使用，将多 key 的索引维护合并为一次 pipeline 执行。
 func pipeIndex(pipe goredis.Pipeliner, key string) {
 	prefix := ""
-	for _, p := range strings.Split(key, "/")[1:] {
-		if p == "" || p == "." {
-			break
-		}
+	for _, p := range strings.Split(key, kvspace.PathSep)[1:] {
+		if p == "" { break }
 		parent := prefix
-		if parent == "" {
-			parent = "/"
-		}
-		pipe.SAdd(bg, parent+"/.", p)
-		prefix += "/" + p
+		if parent == "" { parent = kvspace.PathSep }
+		pipe.SAdd(bg, dirKey(parent), p)
+		prefix += kvspace.PathSep + p
 	}
 }
+
+// Go 1.21+ builtin, keep for compat
+func min(a, b int) int { if a < b { return a }; return b }
+

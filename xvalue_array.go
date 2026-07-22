@@ -41,10 +41,10 @@ func (v XValue) Index(i int) XValue {
 
 func kindSize(k string) int32 {
 	switch k {
-	case "bool", "int8", "uint8": return 1
-	case "int16", "uint16": return 2
-	case "int32", "uint32", "float32": return 4
-	case "int64", "uint64", "float64", "float", "int": return 8
+	case KindBool, "int8", KindUint8: return 1
+	case "int16", KindUint16: return 2
+	case KindInt32, KindUint32, KindFloat32: return 4
+	case KindInt64, KindUint64, KindFloat64, "float", "int": return 8
 	default: return 0
 	}
 }

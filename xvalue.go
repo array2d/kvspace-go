@@ -17,11 +17,11 @@ type XValue struct {
 
 // ── 判断 ─────────────────────────────────────────────────────────────────
 
-func (v XValue) IsNil() bool  { return v.kind == "" || v.kind == "null" }
+func (v XValue) IsNil() bool  { return v.kind == "" || v.kind == KindNull }
 func (v XValue) Kind() string { return v.kind }
 
 // Null returns the explicit null XValue.
-func Null() XValue { return XValue{kind: "null"} }
+func Null() XValue { return XValue{kind: KindNull} }
 
 // RawBytes 返回底层原始字节（任意 kind）。不拷贝，调用方不得修改。
 func (v XValue) RawBytes() []byte { return v.raw }
@@ -57,8 +57,8 @@ func (v XValue) String() string {
 	tag := v.kind
 	if n > 1 { tag = v.kind + "[" + strconv.Itoa(int(n)) + "]" }
 	switch v.kind {
-	case "", "null":
-		return "null"
+	case "", KindNull:
+		return KindNull
 	case "int8", "int16", "int32", "int64":
 		return tag + ":" + strconv.FormatInt(v.Int64(), 10)
 	case "uint8", "uint16", "uint32", "uint64":
