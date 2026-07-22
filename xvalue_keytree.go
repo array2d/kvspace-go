@@ -17,16 +17,16 @@ func DecodeMount(v XValue) string {
 
 // ── Overlay ──────────────────────────────────────────────────────────────────
 
-// NewOverlayValue 返回 overlay XValue：kind="overlay", raw="wPath:rPath"。
-func NewOverlayValue(wPath, rPath string) XValue {
-	return Raw(KindOverlay, []byte(wPath+OverlaySep+rPath))
+// NewOverlayValue 返回 overlay XValue：kind="overlay", raw="upper:lower"。
+func NewOverlayValue(upper, lower string) XValue {
+	return Raw(KindOverlay, []byte(upper+OverlaySep+lower))
 }
 
-// DecodeOverlay 从 overlay XValue 提取 (wPath, rPath, ok)。
+// DecodeOverlay 从 overlay XValue 提取 (upper, lower, ok)。
 // 非 overlay kind 返回 ("", "", false)。
-func DecodeOverlay(v XValue) (wPath, rPath string, ok bool) {
+func DecodeOverlay(v XValue) (upper, lower string, ok bool) {
 	if v.Kind() != KindOverlay { return "", "", false }
-	w, r, found := strings.Cut(string(v.RawBytes()), OverlaySep)
+	u, l, found := strings.Cut(string(v.RawBytes()), OverlaySep)
 	if !found { return "", "", false }
-	return w, r, true
+	return u, l, true
 }

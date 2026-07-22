@@ -42,7 +42,7 @@ type KVSpace interface {
 
 	// ── mount系统 ───────────────────────────────────────────────────────────
 	Mount(target, linkpath string) error // 创建路径映射linkpath → target
-	Overlay(target, r,w string) error // 创建overlay,访问target/，先访问最上层w/，不存则则再后续访问r/
+	Overlay(merge, lower, upper string) error // 创建overlay,访问merge/→先查upper/→回落lower/
 	UnMount(linkpath string) error       // 删除链接linkpath
 
 	// ── 生命周期 ─────────────────────────────────────────────────────────

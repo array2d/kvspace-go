@@ -33,7 +33,7 @@ type linkEntry struct {
 	checked   bool
 	target    string // simple mount: target path
 	isOverlay bool
-	w, r      string // overlay: writable / readonly layers
+	upper, lower string // overlay: writable / readonly layers
 }
 
 type redisImpl struct {
@@ -47,13 +47,13 @@ type redisImpl struct {
 func (r *redisImpl) Get(keys []string) []kvspace.XValue {
 	result := make([]kvspace.XValue, len(keys))
 	pipe := r.rdb.Pipeline()
-	type req struct{ idx int; w, r string }
+	type req struct{ idx int; upper, lower string }
 	var olReqs []req
 	cmds := make([]*goredis.StringCmd, len(keys))
 	for i, k := range keys {
 		resolved := kvspace.ResolveCore(k, r.checkLink)
-		if wPath, rPath, ok := r.resolveOL(resolved); ok {
-			olReqs = append(olReqs, req{i, wPath, rPath})
+		if upper, lower, ok := r.resolveOL(resolved); ok {
+			olReqs = append(olReqs, req{i, upper, lower})
 			cmds[i] = nil
 		} else {
 			cmds[i] = pipe.Get(bg, resolved)
@@ -66,9 +66,9 @@ func (r *redisImpl) Get(keys []string) []kvspace.XValue {
 		if err == nil { result[i] = kvspace.DecodeXValue(raw) }
 	}
 	for _, q := range olReqs {
-		raw, err := r.rdb.Get(bg, q.w).Bytes()
+		raw, err := r.rdb.Get(bg, q.upper).Bytes()
 		if err != nil {
-			raw, err = r.rdb.Get(bg, q.r).Bytes()
+			raw, err = r.rdb.Get(bg, q.lower).Bytes()
 		}
 		if err == nil { result[q.idx] = kvspace.DecodeXValue(raw) }
 	}
@@ -83,8 +83,8 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 			return fmt.Errorf("kvspace: key must not end with %s: %s", kvspace.PathSep, p.Key)
 		}
 		resolved := kvspace.ResolveCore(p.Key, r.checkLink)
-		if wPath, _, ok := r.resolveOL(resolved); ok {
-			resolved = wPath // overlay: write to w layer
+		if upper, _, ok := r.resolveOL(resolved); ok {
+			resolved = upper // overlay: write to upper layer
 		}
 		pipeIndex(pipe, resolved)
 		pipe.Set(bg, resolved, kvspace.EncodeXValue(p.Val), 0)
@@ -95,13 +95,13 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 
 func (r *redisImpl) List(prefix string) []string {
 	resolved := kvspace.ResolveCore(prefix, r.checkLink)
-	if wPath, rPath, ok := r.resolveOL(resolved); ok {
+	if upper, lower, ok := r.resolveOL(resolved); ok {
 		seen := map[string]bool{}
 		var result []string
-		for _, m := range r.rdb.SMembers(bg, dirKey(wPath)).Val() {
+		for _, m := range r.rdb.SMembers(bg, dirKey(upper)).Val() {
 			seen[m] = true; result = append(result, m)
 		}
-		for _, m := range r.rdb.SMembers(bg, dirKey(rPath)).Val() {
+		for _, m := range r.rdb.SMembers(bg, dirKey(lower)).Val() {
 			if !seen[m] { result = append(result, m) }
 		}
 		return result
@@ -144,19 +144,19 @@ func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
 
 func (r *redisImpl) Mount(target, linkpath string) error { return r.Link(target, linkpath) }
 
-func (r *redisImpl) Overlay(target, rPath, wPath string) error {
-	val := kvspace.NewOverlayValue(wPath, rPath)
-	if err := r.rdb.Set(bg, target, kvspace.EncodeXValue(val), 0).Err(); err != nil { return err }
-	r.addIndex(target)
+func (r *redisImpl) Overlay(merge, lower, upper string) error {
+	val := kvspace.NewOverlayValue(upper, lower)
+	if err := r.rdb.Set(bg, merge, kvspace.EncodeXValue(val), 0).Err(); err != nil { return err }
+	r.addIndex(merge)
 	r.linkMu.Lock()
-	r.links[target] = linkEntry{checked: true, isOverlay: true, w: wPath, r: rPath}
+	r.links[merge] = linkEntry{checked: true, isOverlay: true, upper: upper, lower: lower}
 	r.linkMu.Unlock()
 	return nil
 }
 
 func (r *redisImpl) UnMount(linkpath string) error {
 	e := r.checkLinkEntry(linkpath)
-	if e.isOverlay { r.delRecursive(e.w); r.delIndex(e.w) }
+	if e.isOverlay { r.delRecursive(e.upper); r.delIndex(e.upper) }
 	return r.Unlink(linkpath)
 }
 
@@ -201,8 +201,8 @@ func (r *redisImpl) checkLinkEntry(path string) linkEntry {
 	case v.Kind() == kvspace.KindMount:
 		e = linkEntry{checked: true, target: kvspace.DecodeMount(v)}
 	case v.Kind() == kvspace.KindOverlay:
-		if w, r, ok := kvspace.DecodeOverlay(v); ok {
-			e = linkEntry{checked: true, isOverlay: true, w: w, r: r}
+		if upper, lower, ok := kvspace.DecodeOverlay(v); ok {
+			e = linkEntry{checked: true, isOverlay: true, upper: upper, lower: lower}
 		} else {
 			e = linkEntry{checked: true}
 		}
@@ -216,11 +216,11 @@ func (r *redisImpl) checkLinkEntry(path string) linkEntry {
 }
 
 // resolveOL 返回路径的 overlay 信息（最深层祖先），无 overlay 返回 nil。
-func (r *redisImpl) resolveOL(path string) (wPrefix, rPrefix string, ok bool) {
+func (r *redisImpl) resolveOL(path string) (upperPrefix, lowerPrefix string, ok bool) {
 	for i := len(path); i > 0; i = strings.LastIndexByte(path[:i], '/') {
 		if i == 0 { break }
 		if e := r.checkLinkEntry(path[:i]); e.isOverlay {
-			return e.w + path[i:], e.r + path[i:], true
+			return e.upper + path[i:], e.lower + path[i:], true
 		}
 	}
 	return "", "", false
