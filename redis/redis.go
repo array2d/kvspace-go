@@ -99,10 +99,16 @@ func (r *redisImpl) List(prefix string) []string {
 		seen := map[string]bool{}
 		var result []string
 		for _, m := range r.rdb.SMembers(bg, dirKey(upper)).Val() {
+			if strings.HasPrefix(m, kvspace.ReservedPrefix) { continue }
 			seen[m] = true; result = append(result, m)
 		}
 		for _, m := range r.rdb.SMembers(bg, dirKey(lower)).Val() {
-			if !seen[m] { result = append(result, m) }
+			if seen[m] || strings.HasPrefix(m, kvspace.ReservedPrefix) { continue }
+			result = append(result, m)
+		}
+		for _, m := range r.rdb.SMembers(bg, dirKey(resolved)).Val() {
+			if seen[m] || strings.HasPrefix(m, kvspace.ReservedPrefix) { continue }
+			result = append(result, m)
 		}
 		return result
 	}
@@ -216,11 +222,14 @@ func (r *redisImpl) checkLinkEntry(path string) linkEntry {
 }
 
 // resolveOL 返回路径的 overlay 信息（最深层祖先），无 overlay 返回 nil。
+// 跳过保留字段（ReservedPrefix 开头），避免 .upper/.rootfunc 等被 overlay 拦截。
 func (r *redisImpl) resolveOL(path string) (upperPrefix, lowerPrefix string, ok bool) {
 	for i := len(path); i > 0; i = strings.LastIndexByte(path[:i], '/') {
 		if i == 0 { break }
 		if e := r.checkLinkEntry(path[:i]); e.isOverlay {
-			return e.upper + path[i:], e.lower + path[i:], true
+			suffix := path[i:]
+			if strings.HasPrefix(suffix, kvspace.PathSep+kvspace.ReservedPrefix) { continue }
+			return e.upper + suffix, e.lower + suffix, true
 		}
 	}
 	return "", "", false

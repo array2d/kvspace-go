@@ -108,7 +108,7 @@ func printTree(kv kvspace.KVSpace, prefix, indent string) {
 		printSlotTable(kv, prefix, indent, children)
 		return
 	}
-	slots, nonslots := splitSlots(children)
+	slots, nonslots := splitSlots(kv, prefix, children)
 	if len(slots) > 0 { printSlotTable(kv, prefix, indent, slots) }
 	for i, c := range nonslots {
 		last := i == len(nonslots)-1
@@ -128,9 +128,18 @@ func isSlotTable(children []string) bool {
 	return len(children) > 0
 }
 
-func splitSlots(children []string) (slots, nonslots []string) {
+func splitSlots(kv kvspace.KVSpace, prefix string, children []string) (slots, nonslots []string) {
 	for _, c := range children {
-		if strings.HasPrefix(c, "[") && strings.HasSuffix(c, "]") { slots = append(slots, c) } else { nonslots = append(nonslots, c) }
+		if strings.HasPrefix(c, "[") && strings.HasSuffix(c, "]") {
+			// [s0,s1] 若有子节点 → 是子帧目录，不是指令槽
+			if len(kv.List(kvspace.JoinPath(prefix, c))) > 0 {
+				nonslots = append(nonslots, c)
+			} else {
+				slots = append(slots, c)
+			}
+		} else {
+			nonslots = append(nonslots, c)
+		}
 	}
 	return
 }
