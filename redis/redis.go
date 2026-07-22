@@ -16,7 +16,10 @@ func init() { kvspace.Register("redis", ConnPool) }
 
 var bg = context.Background()
 
-const linkSentinel = "->"
+const (
+	linkSentinel    = "->"
+	overlaySentinel = "#>"
+)
 
 func Conn(dsn string) kvspace.KVSpace      { return ConnPool(dsn, 16) }
 func ConnPool(dsn string, poolSize int) kvspace.KVSpace {
@@ -31,7 +34,12 @@ func ConnPool(dsn string, poolSize int) kvspace.KVSpace {
 	}
 }
 
-type linkEntry struct{ checked bool; target string }
+type linkEntry struct {
+	checked   bool
+	target    string // simple mount: target path
+	isOverlay bool
+	w, r      string // overlay: writable / readonly layers
+}
 
 type redisImpl struct {
 	rdb    *goredis.Client
@@ -44,14 +52,30 @@ type redisImpl struct {
 func (r *redisImpl) Get(keys []string) []kvspace.XValue {
 	result := make([]kvspace.XValue, len(keys))
 	pipe := r.rdb.Pipeline()
+	type req struct{ idx int; w, r string }
+	var olReqs []req
 	cmds := make([]*goredis.StringCmd, len(keys))
 	for i, k := range keys {
-		cmds[i] = pipe.Get(bg, kvspace.ResolveCore(k, r.checkLink))
+		resolved := kvspace.ResolveCore(k, r.checkLink)
+		if wPath, rPath, ok := r.resolveOL(resolved); ok {
+			olReqs = append(olReqs, req{i, wPath, rPath})
+			cmds[i] = nil
+		} else {
+			cmds[i] = pipe.Get(bg, resolved)
+		}
 	}
 	pipe.Exec(bg)
 	for i, cmd := range cmds {
+		if cmd == nil { continue }
 		raw, err := cmd.Bytes()
 		if err == nil { result[i] = kvspace.DecodeXValue(raw) }
+	}
+	for _, q := range olReqs {
+		raw, err := r.rdb.Get(bg, q.w).Bytes()
+		if err != nil {
+			raw, err = r.rdb.Get(bg, q.r).Bytes()
+		}
+		if err == nil { result[q.idx] = kvspace.DecodeXValue(raw) }
 	}
 	return result
 }
@@ -64,6 +88,9 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 			return fmt.Errorf("kvspace: key must not end with %s: %s", kvspace.PathSep, p.Key)
 		}
 		resolved := kvspace.ResolveCore(p.Key, r.checkLink)
+		if wPath, _, ok := r.resolveOL(resolved); ok {
+			resolved = wPath // overlay: write to w layer
+		}
 		pipeIndex(pipe, resolved)
 		pipe.Set(bg, resolved, kvspace.EncodeXValue(p.Val), 0)
 	}
@@ -73,8 +100,18 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 
 func (r *redisImpl) List(prefix string) []string {
 	resolved := kvspace.ResolveCore(prefix, r.checkLink)
-	members, _ := r.rdb.SMembers(bg, dirKey(resolved)).Result()
-	return members
+	if wPath, rPath, ok := r.resolveOL(resolved); ok {
+		seen := map[string]bool{}
+		var result []string
+		for _, m := range r.rdb.SMembers(bg, dirKey(wPath)).Val() {
+			seen[m] = true; result = append(result, m)
+		}
+		for _, m := range r.rdb.SMembers(bg, dirKey(rPath)).Val() {
+			if !seen[m] { result = append(result, m) }
+		}
+		return result
+	}
+	return r.rdb.SMembers(bg, dirKey(resolved)).Val()
 }
 
 func (r *redisImpl) Del(keys ...string) error {
@@ -111,10 +148,26 @@ func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
 // ── mount ─────────────────────────────────────────────────────────────────
 
 func (r *redisImpl) Mount(target, linkpath string) error { return r.Link(target, linkpath) }
+
 func (r *redisImpl) Overlay(target, rPath, wPath string) error {
-	return fmt.Errorf("overlay not implemented")
+	val := []byte(overlaySentinel + wPath + "\n" + rPath)
+	if err := r.rdb.Set(bg, target, val, 0).Err(); err != nil { return err }
+	r.addIndex(target)
+	r.linkMu.Lock()
+	r.links[target] = linkEntry{checked: true, isOverlay: true, w: wPath, r: rPath}
+	r.linkMu.Unlock()
+	return nil
 }
-func (r *redisImpl) UnMount(linkpath string) error { return r.Unlink(linkpath) }
+
+func (r *redisImpl) UnMount(linkpath string) error {
+	e := r.checkLinkEntry(linkpath)
+	if e.isOverlay {
+		// delete writable layer
+		r.delRecursive(e.w)
+		r.delIndex(e.w)
+	}
+	return r.Unlink(linkpath)
+}
 
 func (r *redisImpl) Clear() error   { return r.rdb.FlushDB(bg).Err() }
 func (r *redisImpl) DisConn() error { return r.rdb.Close() }
@@ -142,17 +195,41 @@ func (r *redisImpl) Unlink(linkpath string) error {
 }
 
 func (r *redisImpl) checkLink(path string) string {
+	return r.checkLinkEntry(path).target
+}
+
+func (r *redisImpl) checkLinkEntry(path string) linkEntry {
 	r.linkMu.RLock()
 	e := r.links[path]
 	r.linkMu.RUnlock()
-	if e.checked { return e.target }
-	var target string
+	if e.checked { return e }
 	raw, _ := r.rdb.Get(bg, path).Bytes()
-	if len(raw) >= 2 && raw[0] == '-' && raw[1] == '>' { target = string(raw[2:]) }
+	switch {
+	case len(raw) >= 2 && raw[0] == '-' && raw[1] == '>':
+		e = linkEntry{checked: true, target: string(raw[2:])}
+	case len(raw) >= 2 && raw[0] == '#' && raw[1] == '>':
+		body := string(raw[2:])
+		if nl := strings.IndexByte(body, '\n'); nl >= 0 {
+			e = linkEntry{checked: true, isOverlay: true, w: body[:nl], r: body[nl+1:]}
+		}
+	default:
+		e = linkEntry{checked: true}
+	}
 	r.linkMu.Lock()
-	r.links[path] = linkEntry{checked: true, target: target}
+	r.links[path] = e
 	r.linkMu.Unlock()
-	return target
+	return e
+}
+
+// resolveOL 返回路径的 overlay 信息（最深层祖先），无 overlay 返回 nil。
+func (r *redisImpl) resolveOL(path string) (wPrefix, rPrefix string, ok bool) {
+	for i := len(path); i > 0; i = strings.LastIndexByte(path[:i], '/') {
+		if i == 0 { break }
+		if e := r.checkLinkEntry(path[:i]); e.isOverlay {
+			return e.w + path[i:], e.r + path[i:], true
+		}
+	}
+	return "", "", false
 }
 
 // dirKey 返回目录索引键：parent 为 / 时返回 /，否则返回 parent/
