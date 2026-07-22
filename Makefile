@@ -6,8 +6,6 @@ PREFIX        ?= ~/.local
 build:
 	go mod tidy
 	go build -ldflags="-s -w" -o kvspace ./cmd/kvspace/
-
-install: build
 	install -d $(PREFIX)/bin
 	install kvspace $(PREFIX)/bin/kvspace
 
