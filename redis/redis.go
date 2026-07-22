@@ -16,11 +16,6 @@ func init() { kvspace.Register("redis", ConnPool) }
 
 var bg = context.Background()
 
-const (
-	linkSentinel    = "->"
-	overlaySentinel = "#>"
-)
-
 func Conn(dsn string) kvspace.KVSpace      { return ConnPool(dsn, 16) }
 func ConnPool(dsn string, poolSize int) kvspace.KVSpace {
 	if poolSize < 16 { poolSize = 16 }
@@ -150,8 +145,8 @@ func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
 func (r *redisImpl) Mount(target, linkpath string) error { return r.Link(target, linkpath) }
 
 func (r *redisImpl) Overlay(target, rPath, wPath string) error {
-	val := []byte(overlaySentinel + wPath + "\n" + rPath)
-	if err := r.rdb.Set(bg, target, val, 0).Err(); err != nil { return err }
+	val := kvspace.NewOverlayValue(wPath, rPath)
+	if err := r.rdb.Set(bg, target, kvspace.EncodeXValue(val), 0).Err(); err != nil { return err }
 	r.addIndex(target)
 	r.linkMu.Lock()
 	r.links[target] = linkEntry{checked: true, isOverlay: true, w: wPath, r: rPath}
@@ -161,11 +156,7 @@ func (r *redisImpl) Overlay(target, rPath, wPath string) error {
 
 func (r *redisImpl) UnMount(linkpath string) error {
 	e := r.checkLinkEntry(linkpath)
-	if e.isOverlay {
-		// delete writable layer
-		r.delRecursive(e.w)
-		r.delIndex(e.w)
-	}
+	if e.isOverlay { r.delRecursive(e.w); r.delIndex(e.w) }
 	return r.Unlink(linkpath)
 }
 
@@ -175,7 +166,8 @@ func (r *redisImpl) DisConn() error { return r.rdb.Close() }
 // ── soft links (internal, used by Mount/UnMount) ──────────────────────────
 
 func (r *redisImpl) Link(target, linkpath string) error {
-	if err := r.rdb.Set(bg, linkpath, []byte(linkSentinel+target), 0).Err(); err != nil {
+	val := kvspace.NewMountValue(target)
+	if err := r.rdb.Set(bg, linkpath, kvspace.EncodeXValue(val), 0).Err(); err != nil {
 		return err
 	}
 	r.addIndex(linkpath)
@@ -204,13 +196,15 @@ func (r *redisImpl) checkLinkEntry(path string) linkEntry {
 	r.linkMu.RUnlock()
 	if e.checked { return e }
 	raw, _ := r.rdb.Get(bg, path).Bytes()
+	v := kvspace.DecodeXValue(raw)
 	switch {
-	case len(raw) >= 2 && raw[0] == '-' && raw[1] == '>':
-		e = linkEntry{checked: true, target: string(raw[2:])}
-	case len(raw) >= 2 && raw[0] == '#' && raw[1] == '>':
-		body := string(raw[2:])
-		if nl := strings.IndexByte(body, '\n'); nl >= 0 {
-			e = linkEntry{checked: true, isOverlay: true, w: body[:nl], r: body[nl+1:]}
+	case v.Kind() == kvspace.KindMount:
+		e = linkEntry{checked: true, target: kvspace.DecodeMount(v)}
+	case v.Kind() == kvspace.KindOverlay:
+		if w, r, ok := kvspace.DecodeOverlay(v); ok {
+			e = linkEntry{checked: true, isOverlay: true, w: w, r: r}
+		} else {
+			e = linkEntry{checked: true}
 		}
 	default:
 		e = linkEntry{checked: true}

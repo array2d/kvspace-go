@@ -7,10 +7,6 @@ const (
 	DirIndexSuf = "/" // 目录索引键后缀（尾斜杠 = 目录，必须以 / 开头的 key 保证不冲突）
 )
 
-// ── 链接 ─────────────────────────────────────────────────────────────────────
-
-const LinkSentinel = "->"
-
 // ── XValue kind ──────────────────────────────────────────────────────────────
 
 const (
@@ -31,5 +27,9 @@ const (
 	KindString = "string"
 	KindBytes  = "bytes"
 	KindArray1d  = "array1d"
-	KindDict   = "dict"
+	KindDict     = "dict"
+	KindMount    = "mount"
+	KindOverlay  = "overlay"
+
+	OverlaySep = ":" // overlay raw 中 wPath 与 rPath 的分隔符
 )
