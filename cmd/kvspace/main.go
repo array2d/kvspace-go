@@ -35,9 +35,11 @@ func main() {
 
 	switch sub[0] {
 	case "get":
-		if len(sub) < 2 { exitUsage("kvspace get <key>") }
-		vals := kv.Get([]string{sub[1]})
-		if vals[0].IsNil() { fmt.Printf("%s\t(nil)\n", sub[1]) } else { fmt.Printf("%s\t%s\n", sub[1], vals[0]) }
+		if len(sub) < 2 { exitUsage("kvspace get <key1> [key2 ...]") }
+		vals := kv.Get(sub[1:])
+		for i, v := range vals {
+			if v.IsNil() { fmt.Printf("%s\t(nil)\n", sub[i+1]) } else { fmt.Printf("%s\t%s\n", sub[i+1], v) }
+		}
 	case "set":
 		if len(sub) < 3 { exitUsage("kvspace set <key> <value>") }
 		v, err := parseValue(sub[2])
@@ -61,17 +63,12 @@ func main() {
 	case "tree":
 		if len(sub) < 2 { exitUsage("kvspace tree <prefix>") }
 		fmt.Println(sub[1])
-		kvspace.Walk(kv, sub[1], func(path string, v kvspace.XValue) {
-			short := strings.ReplaceAll(v.String(), "\n", "↵")
-			if len(short) > 80 { short = short[:80] + "…" }
-			fmt.Printf("%-60s %s\n", path, short)
-		})
+		printTree(kv, sub[1], "")
 	case "dump":
 		if len(sub) < 2 { exitUsage("kvspace dump <prefix>") }
 		dumpPrefix(kv, sub[1])
 	case "watch":
-		if len(sub) < 2 { exitUsage("kvspace watch <key>") }
-		fmt.Println(kv.Watch(sub[1], 0))
+		cmdWatch(kv, sub[1:])
 	case "notify":
 		if len(sub) < 3 { exitUsage("kvspace notify <key> <value>") }
 		if err := kv.Notify(sub[1], kvspace.Str(sub[2])); err != nil { fatalf("%v", err) }
@@ -86,11 +83,99 @@ func main() {
 func exitUsage(msg string)    { fmt.Fprintln(os.Stderr, "usage:", msg); os.Exit(1) }
 func fatalf(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...); os.Exit(1) }
 
-func dumpPrefix(kv kvspace.KVSpace, prefix string) {
-	v := kv.Get([]string{prefix})[0]
-	if !v.IsNil() { fmt.Printf("%-60s %s\n", prefix, v.String()) }
-	for _, c := range kv.List(prefix) { dumpPrefix(kv, kvspace.JoinPath(prefix, c)) }
+// ── watch ──────────────────────────────────────────────────────────────────
+
+func cmdWatch(kv kvspace.KVSpace, args []string) {
+	fs := flag.NewFlagSet("watch", flag.ExitOnError)
+	timeout := fs.Duration("timeout", 0, "timeout (e.g. 5s, 1m); 0 = block forever")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: kvspace watch [--timeout duration] <key>")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() == 0 { fs.Usage(); os.Exit(1) }
+	fmt.Println(kv.Watch(fs.Arg(0), *timeout))
 }
+
+// ── tree / slot table ──────────────────────────────────────────────────────
+
+func printTree(kv kvspace.KVSpace, prefix, indent string) {
+	children := kv.List(prefix)
+	if len(children) > 0 && isSlotTable(children) {
+		printSlotTable(kv, prefix, indent, children)
+		return
+	}
+	slots, nonslots := splitSlots(children)
+	if len(slots) > 0 { printSlotTable(kv, prefix, indent, slots) }
+	for i, c := range nonslots {
+		last := i == len(nonslots)-1
+		branch := "├── "; if last { branch = "└── " }
+		p := kvspace.JoinPath(prefix, c)
+		v := kv.Get([]string{p})[0]
+		if !v.IsNil() { fmt.Printf("%s%s%s\t%s\n", indent, branch, c, v) } else { fmt.Printf("%s%s%s\n", indent, branch, c) }
+		next := indent + "│   "; if last { next = indent + "    " }
+		printTree(kv, p, next)
+	}
+}
+
+func isSlotTable(children []string) bool {
+	for _, c := range children {
+		if !strings.HasPrefix(c, "[") || !strings.HasSuffix(c, "]") { return false }
+	}
+	return len(children) > 0
+}
+
+func splitSlots(children []string) (slots, nonslots []string) {
+	for _, c := range children {
+		if strings.HasPrefix(c, "[") && strings.HasSuffix(c, "]") { slots = append(slots, c) } else { nonslots = append(nonslots, c) }
+	}
+	return
+}
+
+func printSlotTable(kv kvspace.KVSpace, prefix, indent string, slots []string) {
+	type slot struct{ s0, s1 int; val string }
+	var rows []slot
+	minS1, maxS1, maxS0 := 0, 0, 0
+	for _, s := range slots {
+		var s0, s1 int
+		fmt.Sscanf(s, "[%d,%d]", &s0, &s1)
+		p := kvspace.JoinPath(prefix, s)
+		v := kv.Get([]string{p})[0]
+		val := "(nil)"; if !v.IsNil() { val = v.String() }
+		rows = append(rows, slot{s0, s1, val})
+		if s1 < minS1 { minS1 = s1 }
+		if s1 > maxS1 { maxS1 = s1 }
+		if s0 > maxS0 { maxS0 = s0 }
+	}
+	grid := make([][]string, maxS0+1)
+	for i := range grid {
+		row := make([]string, maxS1-minS1+1)
+		for j := range row { row[j] = "" }
+		grid[i] = row
+	}
+	for _, r := range rows { grid[r.s0][r.s1-minS1] = r.val }
+	colOrder := make([]int, 0, maxS1-minS1+1)
+	for s1 := -1; s1 >= minS1; s1-- { colOrder = append(colOrder, s1) }
+	for s1 := 0; s1 <= maxS1; s1++ { colOrder = append(colOrder, s1) }
+	for s0 := 0; s0 <= maxS0; s0++ {
+		branch := "├── "; if s0 == maxS0 { branch = "└── " }
+		fmt.Fprint(os.Stdout, indent+branch+fmt.Sprintf("[%d]", s0))
+		for _, s1 := range colOrder { fmt.Fprint(os.Stdout, "\t"+grid[s0][s1-minS1]) }
+		fmt.Fprintln(os.Stdout)
+	}
+}
+
+// ── dump ───────────────────────────────────────────────────────────────────
+
+func dumpPrefix(kv kvspace.KVSpace, prefix string) {
+	kvspace.Walk(kv, prefix, func(path string, v kvspace.XValue) {
+		short := strings.ReplaceAll(v.String(), "\n", "↵")
+		if len(short) > 80 { short = short[:80] + "…" }
+		fmt.Printf("%-60s %s\n", path, short)
+	})
+}
+
+// ── value parser ───────────────────────────────────────────────────────────
 
 func parseValue(raw string) (kvspace.XValue, error) {
 	idx := strings.Index(raw, ":")
