@@ -37,6 +37,15 @@ func Bool(v bool) XValue {
 // 非 string 值 → 成员解析走按名回退（deep-dive §10.4），成员键 = 帧感知(base).名。
 func Dict() XValue { return XValue{kind: "dict", arraylength: 1} }
 
+// Time 返回 Unix 纳秒时间戳（kind="time"，8B LE）。
+func Time(unixNano int64) XValue { return XValue{kind: "time", arraylength: 1, raw: encodeInt64(unixNano)} }
+
+// TimeNs 返回时间戳的 Unix 纳秒值（kind!="time" 时返回 0）。
+func (v XValue) TimeNs() int64 {
+	if v.kind != "time" || len(v.raw) < 8 { return 0 }
+	return int64(binary.LittleEndian.Uint64(v.raw))
+}
+
 // ── 整型访问器 ────────────────────────────────────────────────────────────
 
 func (v XValue) Int8() int8 {

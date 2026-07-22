@@ -71,6 +71,8 @@ func (v XValue) String() string {
 		return tag + ":" + strconv.FormatBool(v.Bool())
 	case "string":
 		return tag + ":" + v.Str()
+	case "time":
+		return tag + ":" + strconv.FormatInt(v.TimeNs(), 10)
 	case "rwir":
 		return "rwir:" + string(v.raw)
 	default:
