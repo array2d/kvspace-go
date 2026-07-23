@@ -22,7 +22,7 @@ func main() {
 	dsn := fs.String("kvspace", defaultKVSpace(), "kvspace DSN (redis://host:port)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvspace [--kvspace dsn] <subcommand> [args]")
-		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mount unmount overlay list tree dump watch notify clear")
+		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree link unlink extindex list tree dump watch notify clear")
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[1:])
@@ -36,9 +36,10 @@ func main() {
 	switch sub[0] {
 	case "get":
 		if len(sub) < 2 { exitUsage("kvspace get <key1> [key2 ...]") }
-		vals := kv.Get(sub[1:])
-		for i, v := range vals {
-			if v.IsNil() { fmt.Printf("%s\t(nil)\n", sub[i+1]) } else { fmt.Printf("%s\t%s\n", sub[i+1], v) }
+		for _, k := range sub[1:] {
+			pfx, lst := kvspace.SepPath(k)
+			v := kv.Get(pfx, []string{lst})[0]
+			if v.IsNil() { fmt.Printf("%s\t(nil)\n", k) } else { fmt.Printf("%s\t%s\n", k, v) }
 		}
 	case "set":
 		if len(sub) < 3 { exitUsage("kvspace set <key> <value>") }
@@ -51,15 +52,15 @@ func main() {
 	case "deltree":
 		if len(sub) < 2 { exitUsage("kvspace deltree <prefix>") }
 		if err := kv.DelTree(sub[1]); err != nil { fatalf("%v", err) }
-	case "mount":
-		if len(sub) < 3 { exitUsage("kvspace mount <target> <linkpath>") }
-		if err := kv.Mount(sub[1], sub[2]); err != nil { fatalf("%v", err) }
-	case "unmount":
-		if len(sub) < 2 { exitUsage("kvspace unmount <linkpath>") }
-		if err := kv.UnMount(sub[1]); err != nil { fatalf("%v", err) }
-	case "overlay":
-		if len(sub) < 4 { exitUsage("kvspace overlay <merge> <lower> <upper>") }
-		if err := kv.Overlay(sub[1], sub[2], sub[3]); err != nil { fatalf("%v", err) }
+	case "link":
+		if len(sub) < 3 { exitUsage("kvspace link <target> <linkpath>") }
+		if err := kv.Link(sub[1], sub[2]); err != nil { fatalf("%v", err) }
+	case "unlink":
+		if len(sub) < 2 { exitUsage("kvspace unlink <path>") }
+		if err := kv.UnLink(sub[1]); err != nil { fatalf("%v", err) }
+	case "extindex":
+		if len(sub) < 3 { exitUsage("kvspace extindex <path> <extpath>") }
+		if err := kv.ExtIndex(sub[1], sub[2]); err != nil { fatalf("%v", err) }
 	case "list":
 		if len(sub) < 2 { exitUsage("kvspace list <prefix>") }
 		for _, c := range kv.List(sub[1]) { fmt.Println(c) }
@@ -114,7 +115,8 @@ func printTree(kv kvspace.KVSpace, prefix, indent string) {
 		last := i == len(nonslots)-1
 		branch := "├── "; if last { branch = "└── " }
 		p := kvspace.JoinPath(prefix, c)
-		v := kv.Get([]string{p})[0]
+		pfx, lst := kvspace.SepPath(p)
+		v := kv.Get(pfx, []string{lst})[0]
 		if !v.IsNil() { fmt.Printf("%s%s%s\t%s\n", indent, branch, c, v) } else { fmt.Printf("%s%s%s\n", indent, branch, c) }
 		next := indent + "│   "; if last { next = indent + "    " }
 		printTree(kv, p, next)
@@ -131,7 +133,6 @@ func isSlotTable(children []string) bool {
 func splitSlots(kv kvspace.KVSpace, prefix string, children []string) (slots, nonslots []string) {
 	for _, c := range children {
 		if strings.HasPrefix(c, "[") && strings.HasSuffix(c, "]") {
-			// [s0,s1] 若有子节点 → 是子帧目录，不是指令槽
 			if len(kv.List(kvspace.JoinPath(prefix, c))) > 0 {
 				nonslots = append(nonslots, c)
 			} else {
@@ -152,7 +153,8 @@ func printSlotTable(kv kvspace.KVSpace, prefix, indent string, slots []string) {
 		var s0, s1 int
 		fmt.Sscanf(s, "[%d,%d]", &s0, &s1)
 		p := kvspace.JoinPath(prefix, s)
-		v := kv.Get([]string{p})[0]
+		pfx, lst := kvspace.SepPath(p)
+		v := kv.Get(pfx, []string{lst})[0]
 		val := "(nil)"; if !v.IsNil() { val = v.String() }
 		rows = append(rows, slot{s0, s1, val})
 		if s1 < minS1 { minS1 = s1 }
