@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -13,16 +14,9 @@ import (
 
 func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 	ctx := bg
-	prefix, err := r.resolvePath(ctx, prefix)
-	if err != nil {
-		return nil
-	}
-
-	// 检查 prefix 是否为 extindex，合并读取时需要回退到目标
-	var extT string
-	if isDir(prefix) {
-		extT, _ = r.extTarget(ctx, prefix)
-	}
+	assertDir(prefix)
+	prefix = r.resolvePath(ctx, prefix)
+	extT := r.extTarget(ctx, prefix)
 
 	results := make([]kvspace.XValue, len(keys))
 	for i, k := range keys {
@@ -33,22 +27,24 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 			continue
 		}
 
-		// 文件值：先查本地
 		data, err := r.rdb.Get(ctx, full).Bytes()
 		if err == nil {
 			results[i] = kvspace.DecodeXValue(data)
 			continue
 		}
 		if err != goredis.Nil {
-			continue
+			panic(fmt.Sprintf("kvspace: Get 失败: key=%s err=%v", full, err))
 		}
 
-		// extindex 回退：查目标
 		if extT != "" {
-			data, err := r.rdb.Get(ctx, kvspace.JoinPath(extT, k)).Bytes()
+			targetKey := kvspace.JoinPath(extT, k)
+			data, err := r.rdb.Get(ctx, targetKey).Bytes()
 			if err == nil {
 				results[i] = kvspace.DecodeXValue(data)
 				continue
+			}
+			if err != goredis.Nil {
+				panic(fmt.Sprintf("kvspace: Get ext 回退失败: key=%s err=%v", targetKey, err))
 			}
 		}
 		results[i] = kvspace.Null()
@@ -56,11 +52,13 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 	return results
 }
 
-// getDir 从 Set 重建目录索引 XValue。
 func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
 	members, err := r.rdb.SMembers(ctx, dir).Result()
-	if err != nil || len(members) == 0 {
+	if err == goredis.Nil || len(members) == 0 {
 		return kvspace.Null()
+	}
+	if err != nil {
+		panic(fmt.Sprintf("kvspace: getDir SMEMBERS 失败: %s err=%v", dir, err))
 	}
 
 	var extT string
@@ -80,7 +78,6 @@ func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
 	return kvspace.Raw(kvspace.KindIndex, []byte(strings.Join(nodes, kvspace.PathSep)))
 }
 
-// sepNodes 将节点名编码为 ["/node1/node2"...]。
 func sepNodes(nodes []string) []byte {
 	if len(nodes) == 0 {
 		return nil
@@ -101,19 +98,12 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 
 	for _, p := range pairs {
 		key, val := p.Key, p.Val
-		resolved, err := r.resolvePath(ctx, key)
-		if err != nil {
-			return err
-		}
+		resolved := r.resolvePath(ctx, key)
 
 		if isDir(resolved) {
-			if err := r.setDir(ctx, pipe, resolved, val); err != nil {
-				return err
-			}
+			r.setDir(ctx, pipe, resolved, val)
 		} else {
-			if err := r.setFile(ctx, pipe, resolved, val); err != nil {
-				return err
-			}
+			r.setFile(ctx, pipe, resolved, val)
 		}
 	}
 
@@ -121,15 +111,11 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 	return err
 }
 
-// setFile 写入文件值，维护父目录索引。
-func (r *redisImpl) setFile(ctx context.Context, pipe goredis.Pipeliner, path string, val kvspace.XValue) error {
-	parent, name := kvspace.SepPath(path)
-	if err := r.ensureParent(ctx, parent, name); err != nil {
-		return err
-	}
+func (r *redisImpl) setFile(ctx context.Context, pipe goredis.Pipeliner, path string, val kvspace.XValue) {
+	parent, name := parentName(path)
+	r.ensureParent(ctx, parent, name)
 
-	// extindex 写保护：key 仅在目标存在时 panic
-	if extT, _ := r.extTarget(ctx, parent); extT != "" {
+	if extT := r.extTarget(ctx, parent); extT != "" {
 		localExists, _ := r.rdb.SIsMember(ctx, parent, name).Result()
 		if !localExists {
 			targetExists, _ := r.rdb.SIsMember(ctx, extT, name).Result()
@@ -141,15 +127,11 @@ func (r *redisImpl) setFile(ctx context.Context, pipe goredis.Pipeliner, path st
 
 	pipe.Set(ctx, path, kvspace.EncodeXValue(val), 0)
 	pipe.SAdd(ctx, parent, name)
-	return nil
 }
 
-// setDir 写入目录索引，kind 必须为 index/extindex。
-func (r *redisImpl) setDir(ctx context.Context, pipe goredis.Pipeliner, path string, val kvspace.XValue) error {
-	parent, name := kvspace.SepPath(path)
-	if err := r.ensureParent(ctx, parent, name); err != nil {
-		return err
-	}
+func (r *redisImpl) setDir(ctx context.Context, pipe goredis.Pipeliner, path string, val kvspace.XValue) {
+	parent, name := parentName(path)
+	r.ensureParent(ctx, parent, name)
 
 	pipe.Del(ctx, path)
 	switch val.Kind() {
@@ -167,31 +149,30 @@ func (r *redisImpl) setDir(ctx context.Context, pipe goredis.Pipeliner, path str
 		}
 	}
 	pipe.SAdd(ctx, parent, name)
-	return nil
 }
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
 func (r *redisImpl) List(prefix string) []string {
 	ctx := bg
-	resolved, err := r.resolvePath(ctx, prefix)
-	if err != nil {
-		return nil
-	}
+	assertDir(prefix)
+	resolved := r.resolvePath(ctx, prefix)
 	if !isDir(resolved) {
 		return nil
 	}
 
 	members, err := r.rdb.SMembers(ctx, resolved).Result()
 	if err != nil {
-		return nil
+		panic(fmt.Sprintf("kvspace: List SMEMBERS 失败: prefix=%s err=%v", resolved, err))
 	}
 
-	// 合并 extindex 目标成员
-	extT, _ := r.extTarget(ctx, resolved)
+	extT := r.extTarget(ctx, resolved)
 	var extMembers []string
 	if extT != "" {
-		extMembers, _ = r.rdb.SMembers(ctx, extT).Result()
+		extMembers, err = r.rdb.SMembers(ctx, extT).Result()
+		if err != nil {
+			panic(fmt.Sprintf("kvspace: List SMEMBERS ext 失败: ext=%s err=%v", extT, err))
+		}
 	}
 
 	localSet := make(map[string]bool, len(members))
@@ -219,19 +200,16 @@ func (r *redisImpl) Del(keys ...string) error {
 	pipe := r.rdb.Pipeline()
 
 	for _, key := range keys {
-		resolved, err := r.resolveParent(ctx, key)
-		if err != nil {
-			return err
-		}
+		resolved := r.resolveParent(ctx, key)
+		parent, name := parentName(resolved)
 
 		if isDir(resolved) {
-			parent, name := kvspace.SepPath(resolved)
+			linkKey := resolved[:len(resolved)-len(kvspace.DirIndexSuf)]
+			pipe.Del(ctx, linkKey)
 			pipe.Del(ctx, resolved)
 			pipe.SRem(ctx, parent, name)
 		} else {
-			parent, name := kvspace.SepPath(resolved)
-			// extindex 写保护
-			if extT, _ := r.extTarget(ctx, parent); extT != "" {
+			if extT := r.extTarget(ctx, parent); extT != "" {
 				localExists, _ := r.rdb.SIsMember(ctx, parent, name).Result()
 				if !localExists {
 					targetExists, _ := r.rdb.SIsMember(ctx, extT, name).Result()
@@ -254,8 +232,11 @@ func (r *redisImpl) Del(keys ...string) error {
 func (r *redisImpl) DelTree(prefix string) error {
 	ctx := bg
 
-	// prefix 本身是 link → 只删 link
-	data, err := r.rdb.Get(ctx, prefix).Bytes()
+	linkKey := prefix
+	if isDir(linkKey) && linkKey != kvspace.PathSep {
+		linkKey = linkKey[:len(linkKey)-len(kvspace.DirIndexSuf)]
+	}
+	data, err := r.rdb.Get(ctx, linkKey).Bytes()
 	if err == nil {
 		v := kvspace.DecodeXValue(data)
 		if v.Kind() == kvspace.KindLinkIndex {
@@ -263,11 +244,7 @@ func (r *redisImpl) DelTree(prefix string) error {
 		}
 	}
 
-	resolved, err := r.resolvePath(ctx, prefix)
-	if err != nil {
-		return err
-	}
-
+	resolved := r.resolvePath(ctx, prefix)
 	keys := r.collectKeys(ctx, resolved)
 	if len(keys) == 0 {
 		return nil
@@ -281,7 +258,7 @@ func (r *redisImpl) DelTree(prefix string) error {
 		return err
 	}
 
-	parent, name := kvspace.SepPath(resolved)
+	parent, name := parentName(resolved)
 	return r.rdb.SRem(ctx, parent, name).Err()
 }
 
@@ -289,19 +266,13 @@ func (r *redisImpl) DelTree(prefix string) error {
 
 func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
 	ctx := bg
-	resolved, err := r.resolvePath(ctx, key)
-	if err != nil {
-		return err
-	}
+	resolved := r.resolvePath(ctx, key)
 	return r.rdb.LPush(ctx, notifyPrefix+resolved, kvspace.EncodeXValue(val)).Err()
 }
 
 func (r *redisImpl) Watch(key string, timeout time.Duration) kvspace.XValue {
 	ctx := bg
-	resolved, err := r.resolvePath(ctx, key)
-	if err != nil {
-		return kvspace.Null()
-	}
+	resolved := r.resolvePath(ctx, key)
 	results, err := r.rdb.BLPop(ctx, timeout, notifyPrefix+resolved).Result()
 	if err != nil || len(results) < 2 {
 		return kvspace.Null()
@@ -318,24 +289,20 @@ func (r *redisImpl) Link(target, linkpath string) error {
 		return fmt.Errorf("kvspace: Link target 和 linkpath 类型不一致: %s → %s", target, linkpath)
 	}
 
-	resolved, err := r.resolveParent(ctx, linkpath)
-	if err != nil {
-		return err
+	resolved := r.resolveParent(ctx, linkpath)
+
+	storeKey := resolved
+	if isDir(storeKey) {
+		storeKey = storeKey[:len(storeKey)-len(kvspace.DirIndexSuf)]
 	}
 
-	parent, name := kvspace.SepPath(resolved)
-	if err := r.ensureParent(ctx, parent, name); err != nil {
-		return err
-	}
+	parent, name := parentName(resolved)
+	r.ensureParent(ctx, parent, name)
 
 	pipe := r.rdb.Pipeline()
-	if isDir(resolved) {
-		pipe.SAdd(ctx, resolved, kvspace.EncodeExtEntry(target))
-	} else {
-		pipe.Set(ctx, resolved, kvspace.EncodeXValue(kvspace.NewLinkValue(target)), 0)
-	}
+	pipe.Set(ctx, storeKey, kvspace.EncodeXValue(kvspace.NewLinkValue(target)), 0)
 	pipe.SAdd(ctx, parent, name)
-	_, err = pipe.Exec(ctx)
+	_, err := pipe.Exec(ctx)
 	return err
 }
 
@@ -347,25 +314,18 @@ func (r *redisImpl) ExtIndex(path, extpath string) error {
 		return fmt.Errorf("kvspace: ExtIndex path 和 extpath 必须以 / 结尾: %s, %s", path, extpath)
 	}
 
-	// extpath 不能是 extindex（不容许级联）
-	if t, _ := r.extTarget(ctx, extpath); t != "" {
+	if t := r.extTarget(ctx, extpath); t != "" {
 		return fmt.Errorf("kvspace: ExtIndex 不容许级联: %s 已是 extindex", extpath)
 	}
 
-	resolved, err := r.resolveParent(ctx, path)
-	if err != nil {
-		return err
-	}
-
-	parent, name := kvspace.SepPath(resolved)
-	if err := r.ensureParent(ctx, parent, name); err != nil {
-		return err
-	}
+	resolved := r.resolveParent(ctx, path)
+	parent, name := parentName(resolved)
+	r.ensureParent(ctx, parent, name)
 
 	pipe := r.rdb.Pipeline()
 	pipe.SAdd(ctx, resolved, kvspace.EncodeExtEntry(extpath))
 	pipe.SAdd(ctx, parent, name)
-	_, err = pipe.Exec(ctx)
+	_, err := pipe.Exec(ctx)
 	return err
 }
 
@@ -373,9 +333,23 @@ func (r *redisImpl) ExtIndex(path, extpath string) error {
 
 func (r *redisImpl) UnLink(path string) error {
 	ctx := bg
-	resolved, err := r.resolveParent(ctx, path)
-	if err != nil {
-		return err
+	resolved := r.resolveParent(ctx, path)
+
+	linkKey := resolved
+	if isDir(linkKey) {
+		linkKey = linkKey[:len(linkKey)-len(kvspace.DirIndexSuf)]
+	}
+	data, err := r.rdb.Get(ctx, linkKey).Bytes()
+	if err == nil {
+		v := kvspace.DecodeXValue(data)
+		if v.Kind() == kvspace.KindLinkIndex {
+			pipe := r.rdb.Pipeline()
+			pipe.Del(ctx, linkKey)
+			parent, name := parentName(path)
+			pipe.SRem(ctx, parent, name)
+			_, err = pipe.Exec(ctx)
+			return err
+		}
 	}
 
 	if isDir(resolved) {
@@ -395,7 +369,7 @@ func (r *redisImpl) UnLink(path string) error {
 
 	pipe := r.rdb.Pipeline()
 	pipe.Del(ctx, resolved)
-	parent, name := kvspace.SepPath(resolved)
+	parent, name := parentName(resolved)
 	pipe.SRem(ctx, parent, name)
 	_, err = pipe.Exec(ctx)
 	return err
