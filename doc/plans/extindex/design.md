@@ -134,54 +134,44 @@ ExtIndex("/app", "/base")
   - ExtIndex: 删 `/path` + `/path/`（只删上层，extpath 不受影响）
 - 若 path 无 KindExtIndex → no-op 或报错
 
-## 5. 核心操作：resolveIndexChain
+## 5. 核心操作：ResolveExt
 
-所有路径操作的入口函数，返回索引链：
+extindex 不容许级联——ext 目标必须是普通 index，深度永远 ≤2。因此只需一步查找：
 
 ```go
-// resolveIndexChain 从 dirKey 出发，沿 extindex 链展开
-// dirKey: 如 "/link/"、"/app/"
-// getSet: 读 Set 的函数（方便测试注入）
-// 返回 [当前层dirKey, ext层dirKey, ...]
-// 上限 40 跳防环
-func resolveIndexChain(dirKey string, getSet func(string) []string) []string {
-    chain := []string{dirKey}
-    for range 40 {
-        members := getSet(chain[len(chain)-1])
-        ext := findExt(members)   // 找 ".ext=<path>" 条目
-        if ext == "" { break }
-        chain = append(chain, ext)
+// ResolveExt 从 dirKey 的 Set 中解析 extindex 引用。
+// 返回 (ext_target, 是否有 ext)。ext_target 以 / 结尾。
+func ResolveExt(dirKey string, getSet func(string) []string) (string, bool) {
+    for _, m := range getSet(dirKey) {
+        if e := DecodeExtEntry(m); e != "" {
+            return e, true
+        }
     }
-    return chain
+    return "", false
 }
 ```
 
-### 各操作使用 resolveIndexChain
+内部用 `resolveChain` 包装为 `[self]` 或 `[self, ext]` 以便各操作统一访问。
+
+### 各操作使用 resolveChain
 
 #### Get(prefix, keys)
 
 ```
-for each key in keys:
-    chain = resolveIndexChain(prefix+"/")
-    
-    # 在 chain 中按优先级找 key
+chain, sets = resolveSets(dirKey(prefix))   # chain: [self] 或 [self, ext]
+for each key:
     for i, idx in chain:
-        if key in getSet(idx):
-            # 命中第 i 层 → 取该层对应路径的值
-            actualPath = idx[:len(idx)-1] + "/" + key   # idx 去掉尾/，加 /key
-            return GET(actualPath)
-    
-    # 全不命中 → 返回 null
+        if key in sets[i]:
+            return GET(JoinPath(StripDirSuf(idx), key))
+    → null
 ```
-
-**关键**：LinkIndex 的 Set 为空，所以在第一层不命中，直接到 ext 层；ExtIndex 的 Set 有本地条目，先在本层命中。这是自然的分流，无需 if/else。
 
 #### Set(pairs)
 
 ```
-for each pair (key, val):
-    prefix, last = SepPath(key)   # /app/x → prefix=/app, last=x
-    chain = resolveIndexChain(prefix+"/")
+for each pair:
+    prefix, last = SepPath(key)
+    chain = resolveChain(dirKey(prefix))
     
     # 判定写目标
     if isPureLink(chain[0]):      # 第一层 Set 为空（或只有 .ext）
@@ -275,34 +265,17 @@ else:
 | `r.linkMu` | 无并发 map 访问 |
 | `checkLink()` | XValue Kind 判断替代 |
 | `checkLinkEntry()` | 同上 |
-| `resolveOL()` | resolveIndexChain 替代 |
-| `ResolveCore()` | 索引链替代路径重写 |
+| `resolveOL()` | ResolveExt 替代 |
+| `ResolveCore()` | ResolveExt 替代 |
 | `ResolveParent()` | Del 沿索引链查找归属层 |
 | `KindMount` / `KindOverlay` | KindExtIndex 统一 |
 | `NewMountValue` / `DecodeMount` | NewExtIndexValue / DecodeExtIndex |
 | `NewOverlayValue` / `DecodeOverlay` | 同上 |
 | `OverlaySep` | 不再需要 `:` 分隔符 |
 | Overlay 三参数 API | ExtIndex 二参数 |
+| `ExtMaxHops` / 环检测 | ext 不容许级联，深度 ≤2 |
 
-## 7. 环检测
-
-```go
-func resolveIndexChain(dirKey string, getSet func(string) []string) []string {
-    seen := map[string]bool{dirKey: true}
-    chain := []string{dirKey}
-    current := dirKey
-    for range 40 {
-        members := getSet(current)
-        ext := findExt(members)
-        if ext == "" { break }
-        if seen[ext] { break }  // 环检测
-        seen[ext] = true
-        chain = append(chain, ext)
-        current = ext
-    }
-    return chain
-}
-```
+## 7. 改动文件清单
 
 比 ResolveCore 的逐边界检查更高效——只沿 extindex 链跳转，不扫描路径中每个 `/`。
 
