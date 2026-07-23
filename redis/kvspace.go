@@ -72,22 +72,10 @@ func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
 	}
 
 	if extT != "" {
-		raw := append([]byte(extT), sepNodes(nodes)...)
+		raw := []byte(extT)
 		return kvspace.Raw(kvspace.KindExtIndex, raw)
 	}
 	return kvspace.Raw(kvspace.KindIndex, []byte(strings.Join(nodes, kvspace.PathSep)))
-}
-
-func sepNodes(nodes []string) []byte {
-	if len(nodes) == 0 {
-		return nil
-	}
-	var b []byte
-	for _, n := range nodes {
-		b = append(b, kvspace.PathSep...)
-		b = append(b, n...)
-	}
-	return b
 }
 
 // ── Set ───────────────────────────────────────────────────────────────────────
@@ -204,6 +192,15 @@ func (r *redisImpl) Del(keys ...string) error {
 		parent, name := parentName(resolved)
 
 		if isDir(resolved) {
+			if extT := r.extTarget(ctx, parent); extT != "" {
+				localExists, _ := r.rdb.SIsMember(ctx, parent, name).Result()
+				if !localExists {
+					targetExists, _ := r.rdb.SIsMember(ctx, extT, name).Result()
+					if targetExists {
+						panic(fmt.Sprintf("kvspace: 禁止删除 extindex 只读路径: %s", resolved))
+					}
+				}
+			}
 			linkKey := resolved[:len(resolved)-len(kvspace.DirIndexSuf)]
 			pipe.Del(ctx, linkKey)
 			pipe.Del(ctx, resolved)

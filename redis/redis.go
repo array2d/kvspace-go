@@ -209,9 +209,26 @@ func (r *redisImpl) ensureParent(ctx context.Context, parent, child string) {
 	if err != nil {
 		panic(fmt.Sprintf("kvspace: 父目录检查失败: %s err=%v", parent, err))
 	}
-	if !exists {
-		panic(fmt.Sprintf("kvspace: 父目录不存在: %s（Set %s）", parent, child))
+	if exists {
+		return
 	}
+
+	// 检查 exttarget：父目录可能在 extIndex 的只读层
+	extT := r.extTarget(ctx, gp)
+	if extT != "" {
+		extExists, err := r.rdb.SIsMember(ctx, extT, pn).Result()
+		if err != nil {
+			panic(fmt.Sprintf("kvspace: 父目录 ext 检查失败: %s err=%v", parent, err))
+		}
+		if extExists {
+			// 在 extIndex 本地层创建影子目录，后续写操作落在本地
+			if err := r.rdb.SAdd(ctx, gp, pn).Err(); err != nil {
+				panic(fmt.Sprintf("kvspace: 父目录影子创建失败: %s err=%v", parent, err))
+			}
+			return
+		}
+	}
+	panic(fmt.Sprintf("kvspace: 父目录不存在: %s（Set %s）", parent, child))
 }
 
 func (r *redisImpl) collectKeys(ctx context.Context, prefix string) []string {
