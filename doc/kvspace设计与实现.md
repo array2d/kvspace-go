@@ -44,7 +44,7 @@ KindExtIndex  = "extindex"  //
 ### 3. Link / ExtIndex
 
 Link(target, linkpath)，link可以理解为文件系统软链接
-kind=KindLink,xvalue=存string即可"targetpath"，link来说，target和linkpath要么都是值key，要么都是目录key以/结尾。
+kind=KindLinkIndex,xvalue=存string即可"targetpath"，link来说，target和linkpath要么都是值key，要么都是目录key以/结尾。
 
 
 ExtIndex(path, extpath)，ExtIndex可以理解为写时复制的叠加层
