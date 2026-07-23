@@ -78,6 +78,35 @@ func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
 	return kvspace.Raw(kvspace.KindIndex, []byte(strings.Join(nodes, kvspace.PathSep)))
 }
 
+// ── Mkindex ───────────────────────────────────────────────────────────────────
+
+func (r *redisImpl) Mkindex(path string) error {
+	ctx := bg
+	if !isDir(path) {
+		return fmt.Errorf("kvspace: Mkindex 路径必须以 / 结尾: %s", path)
+	}
+	resolved := r.resolvePath(ctx, path)
+
+	parts := strings.Split(strings.Trim(resolved, kvspace.PathSep), kvspace.PathSep)
+	cur := kvspace.PathSep
+	for _, p := range parts {
+		cur = kvspace.JoinPath(cur, p) + kvspace.DirIndexSuf
+		exists, err := r.rdb.Exists(ctx, cur).Result()
+		if err != nil {
+			return fmt.Errorf("kvspace: Mkindex EXISTS 失败: %s err=%v", cur, err)
+		}
+		if exists > 0 {
+			continue
+		}
+		parent, name := parentName(cur)
+		r.ensureParent(ctx, parent, name)
+		if err := r.rdb.SAdd(ctx, parent, name).Err(); err != nil {
+			return fmt.Errorf("kvspace: Mkindex SADD 失败: %s err=%v", cur, err)
+		}
+	}
+	return nil
+}
+
 // ── Set ───────────────────────────────────────────────────────────────────────
 
 func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
@@ -166,14 +195,14 @@ func (r *redisImpl) List(prefix string) []string {
 	localSet := make(map[string]bool, len(members))
 	var result []string
 	for _, m := range members {
-		if strings.HasPrefix(m, kvspace.ReservedPrefix) {
+		if strings.HasPrefix(m, kvspace.ReservedPrefix) || kvspace.DecodeExtEntry(m) != "" {
 			continue
 		}
 		localSet[m] = true
 		result = append(result, m)
 	}
 	for _, m := range extMembers {
-		if strings.HasPrefix(m, kvspace.ReservedPrefix) || localSet[m] {
+		if strings.HasPrefix(m, kvspace.ReservedPrefix) || kvspace.DecodeExtEntry(m) != "" || localSet[m] {
 			continue
 		}
 		result = append(result, m)
