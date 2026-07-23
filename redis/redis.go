@@ -99,15 +99,23 @@ type redisImpl struct {
 // ── KVSpace interface ──────────────────────────────────────────────────────────
 
 func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
-	chain, sets := r.resolveSets(dirKey(prefix))
+	dk := dirKey(prefix)
+	var paths []string
 
-	// 为每个 key 定位实际存储路径
-	paths := make([]string, len(keys))
-	for i, k := range keys {
-		paths[i] = findInSets(prefix, k, chain, sets)
+	if kvspace.HasExtRef(r.getXV(prefix)) {
+		chain, sets := r.resolveSets(dk)
+		paths = make([]string, len(keys))
+		for i, k := range keys {
+			paths[i] = findInSets(prefix, k, chain, sets)
+		}
+	} else {
+		// 普通路径：无需 SMEMBERS，直接构造路径
+		paths = make([]string, len(keys))
+		for i, k := range keys {
+			paths[i] = kvspace.JoinPath(prefix, k)
+		}
 	}
 
-	// pipeline GET
 	pipe := r.rdb.Pipeline()
 	cmds := make([]*goredis.StringCmd, len(keys))
 	for i, p := range paths {
@@ -145,7 +153,6 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 			// 纯链接：写入终端层
 			writeIdx := chain[len(chain)-1]
 			writePath := kvspace.JoinPath(kvspace.StripDirSuf(writeIdx), last)
-			pipe.SAdd(bg, writeIdx, last)
 			pipe.Set(bg, writePath, kvspace.EncodeXValue(p.Val), 0)
 			pipeIndex(pipe, writePath)
 		} else {
@@ -236,12 +243,9 @@ func (r *redisImpl) Link(target, linkpath string) error {
 	pipe := r.rdb.Pipeline()
 	pipe.Set(bg, linkpath, kvspace.EncodeXValue(val), 0)
 	pipe.SAdd(bg, dirKey(linkpath), kvspace.EncodeExtEntry(target))
+	pipeIndex(pipe, linkpath)
 	_, err := pipe.Exec(bg)
-	if err != nil {
-		return err
-	}
-	r.addIndex(linkpath)
-	return nil
+	return err
 }
 
 func (r *redisImpl) ExtIndex(path, extpath string) error {
@@ -249,12 +253,9 @@ func (r *redisImpl) ExtIndex(path, extpath string) error {
 	pipe := r.rdb.Pipeline()
 	pipe.Set(bg, path, kvspace.EncodeXValue(val), 0)
 	pipe.SAdd(bg, dirKey(path), kvspace.EncodeExtEntry(extpath))
+	pipeIndex(pipe, path)
 	_, err := pipe.Exec(bg)
-	if err != nil {
-		return err
-	}
-	r.addIndex(path)
-	return nil
+	return err
 }
 
 func (r *redisImpl) UnLink(path string) error {
@@ -285,12 +286,23 @@ func (r *redisImpl) resolveChain(dirKey string) []string {
 }
 
 func (r *redisImpl) resolveSets(dirKey string) ([]string, [][]string) {
-	chain := r.resolveChain(dirKey)
-	sets := make([][]string, len(chain))
-	for i, dk := range chain {
-		sets[i] = r.rdb.SMembers(bg, dk).Val()
+	members0 := r.rdb.SMembers(bg, dirKey).Val()
+	chain := []string{dirKey}
+	sets := [][]string{members0}
+	if ext := findExtIn(members0); ext != "" {
+		chain = append(chain, ext)
+		sets = append(sets, r.rdb.SMembers(bg, ext).Val())
 	}
 	return chain, sets
+}
+
+func findExtIn(members []string) string {
+	for _, m := range members {
+		if e := kvspace.DecodeExtEntry(m); e != "" {
+			return e
+		}
+	}
+	return ""
 }
 
 // resolveKey 解析单个 key：若 prefix 是纯链接则穿透到终端。
@@ -367,21 +379,6 @@ func (r *redisImpl) delRecursive(prefix string) {
 		r.delRecursive(kvspace.JoinPath(prefix, c))
 	}
 	r.rdb.Del(bg, prefix, dirKey(prefix))
-}
-
-func (r *redisImpl) addIndex(key string) {
-	prefix := ""
-	for _, p := range strings.Split(key, kvspace.PathSep)[1:] {
-		if p == "" {
-			break
-		}
-		parent := prefix
-		if parent == "" {
-			parent = kvspace.PathSep
-		}
-		r.rdb.SAdd(bg, dirKey(parent), p)
-		prefix += kvspace.PathSep + p
-	}
 }
 
 func (r *redisImpl) delIndex(key string) {
