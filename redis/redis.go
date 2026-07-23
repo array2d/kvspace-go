@@ -3,12 +3,12 @@ package redis
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/array2d/kvspace-go"
@@ -19,13 +19,14 @@ func init() { kvspace.Register("redis", ConnPool) }
 
 var bg = context.Background()
 
-// redisLogLv: 0=off, 1=cmd names, 2=full args+timing
 var redisLogLv = func() int {
 	if v, _ := strconv.Atoi(os.Getenv("KVSPACE_REDIS_LOG")); v > 0 {
 		return v
 	}
 	return 0
 }()
+
+const notifyPrefix = "__notify:"
 
 func Conn(dsn string) kvspace.KVSpace { return ConnPool(dsn) }
 
@@ -42,7 +43,8 @@ func ConnPool(dsn string) kvspace.KVSpace {
 	return &redisImpl{rdb: rdb}
 }
 
-// logHook 记录每条 Redis 命令及耗时。等级由 KVSPACE_REDIS_LOG 控制。
+// ── 日志 Hook ─────────────────────────────────────────────────────────────────
+
 type logHook struct{}
 
 func (h *logHook) DialHook(next goredis.DialHook) goredis.DialHook {
@@ -92,9 +94,141 @@ func cmdName(c goredis.Cmder) string {
 	return s
 }
 
+// ── 实现体 ────────────────────────────────────────────────────────────────────
+
 type redisImpl struct {
 	rdb *goredis.Client
-	mu  sync.Mutex
 }
 
-// ── KVSpace interface ──────────────────────────────────────────────────────────
+// ── 目录与路径工具 ────────────────────────────────────────────────────────────
+
+func isDir(path string) bool { return strings.HasSuffix(path, kvspace.DirIndexSuf) }
+
+func assertDir(path string) {
+	if path != kvspace.PathSep && !isDir(path) {
+		panic(fmt.Sprintf("kvspace: 目录必须以 / 结尾: %s", path))
+	}
+}
+
+func parentName(path string) (string, string) {
+	if isDir(path) && path != kvspace.PathSep {
+		path = path[:len(path)-len(kvspace.DirIndexSuf)]
+	}
+	parent, last := kvspace.SepPath(path)
+	if parent != kvspace.PathSep {
+		parent += kvspace.DirIndexSuf
+	}
+	return parent, last
+}
+
+// resolvePath 解析路径中所有 link，直接 panic 于异常。
+func (r *redisImpl) resolvePath(ctx context.Context, path string) string {
+	for {
+		resolved, changed := r.resolveOne(ctx, path)
+		if !changed {
+			return resolved
+		}
+		path = resolved
+	}
+}
+
+// resolveParent 解析父路径中的 link（末段不解析）。
+func (r *redisImpl) resolveParent(ctx context.Context, path string) string {
+	dirSuf := isDir(path) && path != kvspace.PathSep
+	clean := path
+	if dirSuf {
+		clean = path[:len(path)-len(kvspace.DirIndexSuf)]
+	}
+	parent, last := kvspace.SepPath(clean)
+	if parent == clean {
+		return path
+	}
+	resolved := r.resolvePath(ctx, parent)
+	result := kvspace.JoinPath(resolved, last)
+	if dirSuf {
+		result += kvspace.DirIndexSuf
+	}
+	return result
+}
+
+func (r *redisImpl) resolveOne(ctx context.Context, path string) (string, bool) {
+	if path == kvspace.PathSep {
+		return path, false
+	}
+	parts := strings.Split(strings.Trim(path, kvspace.PathSep), kvspace.PathSep)
+	cur := kvspace.PathSep
+	for i, p := range parts {
+		cur = kvspace.JoinPath(cur, p)
+		data, err := r.rdb.Get(ctx, cur).Bytes()
+		if err == goredis.Nil {
+			continue
+		}
+		if err != nil {
+			panic(fmt.Sprintf("kvspace: 路径解析 GET 失败: %s err=%v", cur, err))
+		}
+		v := kvspace.DecodeXValue(data)
+		if v.Kind() == kvspace.KindLinkIndex {
+			target := string(v.RawBytes())
+			if i+1 < len(parts) {
+				return kvspace.JoinPath(target, strings.Join(parts[i+1:], kvspace.PathSep)), true
+			}
+			return target, true
+		}
+	}
+	return path, false
+}
+
+func (r *redisImpl) extTarget(ctx context.Context, dir string) string {
+	if !isDir(dir) {
+		return ""
+	}
+	members, err := r.rdb.SMembers(ctx, dir).Result()
+	if err == goredis.Nil {
+		return ""
+	}
+	if err != nil {
+		panic(fmt.Sprintf("kvspace: extTarget SMEMBERS 失败: %s err=%v", dir, err))
+	}
+	for _, m := range members {
+		if t := kvspace.DecodeExtEntry(m); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+func (r *redisImpl) ensureParent(ctx context.Context, parent, child string) {
+	if parent == kvspace.PathSep {
+		return
+	}
+	if !isDir(parent) {
+		panic(fmt.Sprintf("kvspace: 父路径不是目录: %s（Set %s）", parent, child))
+	}
+	gp, pn := parentName(parent)
+	exists, err := r.rdb.SIsMember(ctx, gp, pn).Result()
+	if err != nil {
+		panic(fmt.Sprintf("kvspace: 父目录检查失败: %s err=%v", parent, err))
+	}
+	if !exists {
+		panic(fmt.Sprintf("kvspace: 父目录不存在: %s（Set %s）", parent, child))
+	}
+}
+
+func (r *redisImpl) collectKeys(ctx context.Context, prefix string) []string {
+	pattern := prefix + "*"
+	var keys []string
+	var cursor uint64
+	for {
+		var batch []string
+		var err error
+		batch, cursor, err = r.rdb.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			panic(fmt.Sprintf("kvspace: SCAN 失败: pattern=%s err=%v", pattern, err))
+		}
+		keys = append(keys, batch...)
+		if cursor == 0 {
+			break
+		}
+	}
+	return keys
+}
