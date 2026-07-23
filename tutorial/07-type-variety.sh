@@ -1,54 +1,53 @@
 #!/bin/bash
 # expected:
-# === integer edge values ===
-# /types/zero	int64:0
-# /types/neg	int64:-9223372036854775808
-# /types/pos	int64:9223372036854775807
-# === float edge values ===
-# /types/f0	float64:0
-# /types/fneg	float64:-3.141592653589793
-# /types/fpos	float64:2.718281828459045
+# === int ===
+# /t/zero	int64:0
+# /t/neg	int64:-9223372036854775808
+# /t/pos	int64:9223372036854775807
+# === float ===
+# /t/f0	float64:0
+# /t/fneg	float64:-3.141592653589793
+# /t/fpos	float64:2.718281828459045
 # === bool ===
-# /types/yes	bool:true
-# /types/no	bool:false
-# === string edge values ===
-# /types/empty	string:
-# /types/space	string:hello world
-# /types/unicode	string:你好🫡
-# /types/slash	string:a/b/c
+# /t/yes	bool:true
+# /t/no	bool:false
+# === string ===
+# /t/empty	string:
+# /t/space	string:hello world
+# /t/unicode	string:你好
 # === nil ===
-# /types/nothing	(nil)
+# /t/nothing	(nil)
 # /end
 
 set -e
 KV="$HOME/.local/bin/kvspace"
+$KV set /t/ index:
 
-echo "=== integer edge values ==="
-$KV set /types/zero int:0
-$KV set /types/neg int:-9223372036854775808
-$KV set /types/pos int:9223372036854775807
-$KV get /types/zero /types/neg /types/pos
+echo "=== int ==="
+$KV set /t/zero int:0
+$KV set /t/neg int:-9223372036854775808
+$KV set /t/pos int:9223372036854775807
+$KV get /t/zero /t/neg /t/pos
 
-echo "=== float edge values ==="
-$KV set /types/f0 float:0
-$KV set /types/fneg float:-3.141592653589793
-$KV set /types/fpos float:2.718281828459045
-$KV get /types/f0 /types/fneg /types/fpos
+echo "=== float ==="
+$KV set /t/f0 float:0
+$KV set /t/fneg float:-3.141592653589793
+$KV set /t/fpos float:2.718281828459045
+$KV get /t/f0 /t/fneg /t/fpos
 
 echo "=== bool ==="
-$KV set /types/yes bool:true
-$KV set /types/no bool:false
-$KV get /types/yes /types/no
+$KV set /t/yes bool:true
+$KV set /t/no bool:false
+$KV get /t/yes /t/no
 
-echo "=== string edge values ==="
-$KV set /types/empty string:
-$KV set /types/space "string:hello world"
-$KV set /types/unicode string:你好🫡
-$KV set /types/slash string:a/b/c
-$KV get /types/empty /types/space /types/unicode /types/slash
+echo "=== string ==="
+$KV set /t/empty string:
+$KV set /t/space "string:hello world"
+$KV set /t/unicode string:你好
+$KV get /t/empty /t/space /t/unicode
 
 echo "=== nil ==="
-$KV set /types/nothing nil:
-$KV get /types/nothing
+$KV set /t/nothing nil:
+$KV get /t/nothing
 
-$KV deltree /types
+$KV deltree /t

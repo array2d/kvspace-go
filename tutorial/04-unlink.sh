@@ -12,18 +12,19 @@
 set -e
 KV="$HOME/.local/bin/kvspace"
 
-
 echo "=== unlink link ==="
+$KV set /tgt/ index:
 $KV set /tgt/x int:1
-$KV link /tgt /lnk
+$KV link /tgt/ /lnk/
 $KV get /lnk/x
 $KV unlink /lnk
 $KV get /lnk
 $KV get /tgt/x
 
 echo "=== unlink extindex ==="
+$KV set /base/ index:
 $KV set /base/a int:2
-$KV extindex /merge /base
+$KV extindex /merge/ /base/
 $KV set /merge/b int:3
 $KV unlink /merge
 $KV get /merge

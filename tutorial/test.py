@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """运行 tutorial/*.sh，对比脚本头部注释中的 expected 输出。"""
 
 import os, subprocess, sys
@@ -24,8 +25,10 @@ def extract_expected(script):
 def run_script(script):
     """先 clear，再执行脚本，返回 stdout 行列表。"""
     kvbin = os.path.expanduser('~/.local/bin/kvspace')
-    subprocess.run([kvbin, 'clear'], capture_output=True, timeout=10)
-    r = subprocess.run(['bash', script], capture_output=True, text=True, timeout=30)
+    env = os.environ.copy()
+    env.setdefault('KVLANG_KVSPACE', 'redis://127.0.0.1:6379')
+    subprocess.run([kvbin, 'clear'], capture_output=True, timeout=10, env=env)
+    r = subprocess.run(['bash', script], capture_output=True, text=True, timeout=30, env=env)
     return r.stdout.rstrip('\n').split('\n') if r.stdout.strip() else []
 
 def test_script(script):

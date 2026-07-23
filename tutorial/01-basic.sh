@@ -22,8 +22,8 @@
 set -e
 KV="$HOME/.local/bin/kvspace"
 
-
 echo "=== Set & Get ==="
+$KV set /t01/ index:
 $KV set /t01/a int:42
 $KV get /t01/a
 
@@ -45,4 +45,4 @@ $KV list /t01
 
 echo "=== DelTree ==="
 $KV deltree /t01
-$KV list /
+$KV list /t01
