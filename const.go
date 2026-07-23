@@ -6,8 +6,7 @@ const (
 	PathSep        = "/"    // 路径分隔符
 	DirIndexSuf    = "/"    // 目录索引键后缀（尾斜杠 = 目录，必须以 / 开头的 key 保证不冲突）
 	ReservedPrefix = "."    // 引擎保留字段前缀，List 时隐藏
-	ExtIndexSep    = "="    // extindex 引用分隔符，如 .ext=/target/
-	ExtIndexTag    = ".ext" // dir Set 中 extindex 引用的保留条目名
+	ExtIndexHead = "=" // dir Set 中 extindex 引用的保留条目前缀，如 =/target/
 )
 
 // ── XValue kind ──────────────────────────────────────────────────────────────

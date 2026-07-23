@@ -34,19 +34,19 @@ func IsLink(v XValue) bool { return v.Kind() == KindLinkIndex }
 
 // ── Dir Set extindex 条目编解码 ──────────────────────────────────────────────
 
-// EncodeExtEntry 编码 dir Set 中的 extindex 条目，如 ".ext=/target/"。
+// EncodeExtEntry 编码 dir Set 中的 extindex 条目，如 "=/target/"。
 func EncodeExtEntry(extpath string) string {
 	if strings.HasSuffix(extpath, DirIndexSuf) {
-		return ExtIndexTag + ExtIndexSep + extpath
+		return ExtIndexHead + extpath
 	}
-	return ExtIndexTag + ExtIndexSep + extpath + DirIndexSuf
+	return ExtIndexHead + extpath + DirIndexSuf
 }
 
 // DecodeExtEntry 从 dir Set 成员解码 extindex 目标路径（含尾 /）。
 // 非 ext 条目返回 ""。
 func DecodeExtEntry(member string) string {
-	if !strings.HasPrefix(member, ExtIndexTag+ExtIndexSep) {
+	if !strings.HasPrefix(member, ExtIndexHead) {
 		return ""
 	}
-	return member[len(ExtIndexTag)+len(ExtIndexSep):]
+	return member[len(ExtIndexHead):]
 }
