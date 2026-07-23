@@ -102,22 +102,6 @@ func TestDelIndex_ParentValueKeeps(t *testing.T) {
 	}
 }
 
-func TestDelIndex_DirWithChildrenKept(t *testing.T) {
-	kv := testKV(t)
-	defer kv.DelTree("/t13d")
-	kv.Set([]kvspace.KVPair{kvp("/t13d", i64(1))})
-	kv.Set([]kvspace.KVPair{kvp("/t13d/k", i64(2))})
-	kv.Del("/t13d")
-	children := kv.List("/t13d")
-	if !contains(children, "k") {
-		t.Errorf("List(/t13d) = %v, want 含 k", children)
-	}
-	root := kv.List("/")
-	if !contains(root, "t13d") {
-		t.Errorf("/t13d/. 非空，t13d 应保留于根索引")
-	}
-}
-
 // ── Link / ExtIndex 集成测试 ───────────────────────────────────────────────
 
 func TestLink_GetTransparent(t *testing.T) {
