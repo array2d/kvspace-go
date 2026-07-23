@@ -79,7 +79,7 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 		dk := dirKey(prefix)
 		chain := r.resolveChain(dk)
 
-		if len(chain) > 1 && isPureLinkSet(r.getSet(chain[0])) {
+		if len(chain) > 1 && kvspace.IsLink(r.getXV(prefix)) {
 			// 纯链接：写入终端层
 			writeIdx := chain[len(chain)-1]
 			writePath := kvspace.JoinPath(kvspace.StripDirSuf(writeIdx), last)
@@ -170,8 +170,7 @@ func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
 
 // ── mount ─────────────────────────────────────────────────────────────────────
 func (r *redisImpl) Link(target, linkpath string) error {
-
-	val := kvspace.NewExtIndexValue(target + kvspace.DirIndexSuf)
+	val := kvspace.NewLinkValue(target + kvspace.DirIndexSuf)
 	pipe := r.rdb.Pipeline()
 	pipe.Set(bg, linkpath, kvspace.EncodeXValue(val), 0)
 	pipe.SAdd(bg, dirKey(linkpath), kvspace.EncodeExtEntry(target))
@@ -214,9 +213,13 @@ func (r *redisImpl) DisConn() error { return r.rdb.Close() }
 // ── 索引链解析（内部）──────────────────────────────────────────────────────────
 
 func (r *redisImpl) resolveChain(dirKey string) []string {
-	return kvspace.ResolveIndexChain(dirKey, func(dk string) []string {
+	chain := []string{dirKey}
+	if ext, ok := kvspace.ResolveExt(dirKey, func(dk string) []string {
 		return r.rdb.SMembers(bg, dk).Val()
-	})
+	}); ok {
+		chain = append(chain, ext)
+	}
+	return chain
 }
 
 func (r *redisImpl) resolveSets(dirKey string) ([]string, [][]string) {
@@ -228,16 +231,12 @@ func (r *redisImpl) resolveSets(dirKey string) ([]string, [][]string) {
 	return chain, sets
 }
 
-func (r *redisImpl) getSet(dirKey string) []string {
-	return r.rdb.SMembers(bg, dirKey).Val()
-}
-
 // resolveKey 解析单个 key：若 prefix 是纯链接则穿透到终端。
 func (r *redisImpl) resolveKey(key string) string {
 	prefix, last := kvspace.SepPath(key)
 	dk := dirKey(prefix)
 	chain := r.resolveChain(dk)
-	if len(chain) > 1 && isPureLinkSet(r.getSet(chain[0])) {
+	if len(chain) > 1 && kvspace.IsLink(r.getXV(prefix)) {
 		idx := chain[len(chain)-1]
 		return kvspace.JoinPath(kvspace.StripDirSuf(idx), last)
 	}
@@ -248,11 +247,8 @@ func (r *redisImpl) resolveKey(key string) string {
 func (r *redisImpl) resolveTreeTarget(prefix string) string {
 	dk := dirKey(prefix)
 	chain := r.resolveChain(dk)
-	if len(chain) > 1 && isPureLinkSet(r.getSet(chain[0])) {
-		return prefix // 纯链接：返回自身，由调用方 UnLink
-	}
-	if len(chain) > 1 {
-		return prefix // extindex：删上层
+	if len(chain) > 1 && kvspace.IsLink(r.getXV(prefix)) {
+		return prefix
 	}
 	return prefix
 }
@@ -284,18 +280,10 @@ func findLayer(key string, sets [][]string) (int, int) {
 	return -1, -1
 }
 
-// isPureLinkSet 判定 Set 成员是否构成纯链接（只有 ext 条目，无本地数据）。
-func isPureLinkSet(members []string) bool {
-	hasData := false
-	hasExt := false
-	for _, m := range members {
-		if kvspace.DecodeExtEntry(m) != "" {
-			hasExt = true
-		} else if !strings.HasPrefix(m, kvspace.ReservedPrefix) {
-			hasData = true
-		}
-	}
-	return hasExt && !hasData
+// getXV 读取 path 的 XValue，不存在返零值。
+func (r *redisImpl) getXV(path string) kvspace.XValue {
+	raw, _ := r.rdb.Get(bg, path).Bytes()
+	return kvspace.DecodeXValue(raw)
 }
 
 // dirKey 返回目录索引键。

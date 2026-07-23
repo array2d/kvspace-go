@@ -6,50 +6,23 @@ import (
 	kvspace "github.com/array2d/kvspace-go"
 )
 
-// ── ResolveIndexChain 单元测试（纯函数，无 Redis）───────────────────────────
+// ── ResolveExt 单元测试（纯函数，无 Redis）─────────────────────────────────
 
 func testGetSet(members map[string][]string) func(string) []string {
 	return func(dk string) []string { return members[dk] }
 }
 
-func TestResolveIndexChain_NoExt(t *testing.T) {
-	got := kvspace.ResolveIndexChain("/a/", testGetSet(map[string][]string{"/a/": {"x", "y"}}))
-	if len(got) != 1 || got[0] != "/a/" {
-		t.Errorf("got %v", got)
+func TestResolveExt_NoExt(t *testing.T) {
+	ext, ok := kvspace.ResolveExt("/a/", testGetSet(map[string][]string{"/a/": {"x", "y"}}))
+	if ok || ext != "" {
+		t.Errorf("got (%q, %v), want empty", ext, ok)
 	}
 }
 
-func TestResolveIndexChain_SingleLink(t *testing.T) {
-	sets := map[string][]string{
-		"/link/":   {".ext=/target/"},
-		"/target/": {"x", "y"},
-	}
-	got := kvspace.ResolveIndexChain("/link/", testGetSet(sets))
-	if len(got) != 2 || got[0] != "/link/" || got[1] != "/target/" {
-		t.Errorf("got %v", got)
-	}
-}
-
-func TestResolveIndexChain_Chain(t *testing.T) {
-	sets := map[string][]string{
-		"/a/": {".ext=/b/"},
-		"/b/": {".ext=/c/"},
-		"/c/": {"x"},
-	}
-	got := kvspace.ResolveIndexChain("/a/", testGetSet(sets))
-	if len(got) != 3 {
-		t.Errorf("got %v", got)
-	}
-}
-
-func TestResolveIndexChain_Cycle(t *testing.T) {
-	sets := map[string][]string{
-		"/a/": {".ext=/b/"},
-		"/b/": {".ext=/a/"},
-	}
-	got := kvspace.ResolveIndexChain("/a/", testGetSet(sets))
-	if len(got) > 40 {
-		t.Errorf("cycle not stopped: len=%d", len(got))
+func TestResolveExt_HasExt(t *testing.T) {
+	ext, ok := kvspace.ResolveExt("/link/", testGetSet(map[string][]string{"/link/": {".ext=/target/"}}))
+	if !ok || ext != "/target/" {
+		t.Errorf("got (%q, %v), want (/target/, true)", ext, ok)
 	}
 }
 
