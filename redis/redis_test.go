@@ -6,126 +6,78 @@ import (
 	kvspace "github.com/array2d/kvspace-go"
 )
 
-// ResolveCore 单元测试（纯函数，无 Redis）
-// lookup 直接读 map：非空 = 链接 target；"" = 否定缓存；key 不存在 = 等价于非链接
+// ── ResolveIndexChain 单元测试（纯函数，无 Redis）───────────────────────────
 
-func testLookup(links map[string]string) func(string) string {
-	return func(p string) string { return links[p] }
+func testGetSet(members map[string][]string) func(string) []string {
+	return func(dk string) []string { return members[dk] }
 }
 
-func TestResolveCore_NoLink(t *testing.T) {
-	got := kvspace.ResolveCore("/func/pkg/add", testLookup(nil))
-	if got != "/func/pkg/add" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestResolveCore_ExactMatch(t *testing.T) {
-	got := kvspace.ResolveCore("/nodeB", testLookup(map[string]string{"/nodeB": "/nodeA"}))
-	if got != "/nodeA" {
-		t.Errorf("got %q", got)
+func TestResolveIndexChain_NoExt(t *testing.T) {
+	got := kvspace.ResolveIndexChain("/a/", testGetSet(map[string][]string{"/a/": {"x", "y"}}))
+	if len(got) != 1 || got[0] != "/a/" {
+		t.Errorf("got %v", got)
 	}
 }
 
-func TestResolveCore_PrefixMatch(t *testing.T) {
-	got := kvspace.ResolveCore("/nodeB/foo/bar", testLookup(map[string]string{"/nodeB": "/nodeA"}))
-	if got != "/nodeA/foo/bar" {
-		t.Errorf("got %q", got)
+func TestResolveIndexChain_SingleLink(t *testing.T) {
+	sets := map[string][]string{
+		"/link/":   {".ext=/target/"},
+		"/target/": {"x", "y"},
+	}
+	got := kvspace.ResolveIndexChain("/link/", testGetSet(sets))
+	if len(got) != 2 || got[0] != "/link/" || got[1] != "/target/" {
+		t.Errorf("got %v", got)
 	}
 }
 
-func TestResolveCore_NoPrefixFalsePositive(t *testing.T) {
-	// /nodeBextra 不应匹配 /nodeB（必须在 '/' 边界）
-	got := kvspace.ResolveCore("/nodeBextra/x", testLookup(map[string]string{"/nodeB": "/nodeA"}))
-	if got != "/nodeBextra/x" {
-		t.Errorf("got %q", got)
+func TestResolveIndexChain_Chain(t *testing.T) {
+	sets := map[string][]string{
+		"/a/": {".ext=/b/"},
+		"/b/": {".ext=/c/"},
+		"/c/": {"x"},
+	}
+	got := kvspace.ResolveIndexChain("/a/", testGetSet(sets))
+	if len(got) != 3 {
+		t.Errorf("got %v", got)
 	}
 }
 
-func TestResolveCore_Chain(t *testing.T) {
-	got := kvspace.ResolveCore("/c/foo", testLookup(map[string]string{"/c": "/b", "/b": "/a"}))
-	if got != "/a/foo" {
-		t.Errorf("got %q", got)
+func TestResolveIndexChain_Cycle(t *testing.T) {
+	sets := map[string][]string{
+		"/a/": {".ext=/b/"},
+		"/b/": {".ext=/a/"},
+	}
+	got := kvspace.ResolveIndexChain("/a/", testGetSet(sets))
+	if len(got) > 40 {
+		t.Errorf("cycle not stopped: len=%d", len(got))
 	}
 }
 
-func TestResolveCore_ShortestPrefixFirst(t *testing.T) {
-	got := kvspace.ResolveCore("/func/builtin/add", testLookup(map[string]string{"/func": "/f"}))
-	if got != "/f/builtin/add" {
-		t.Errorf("got %q", got)
+// ── EncodeExtEntry / DecodeExtEntry ─────────────────────────────────────────
+
+func TestExtEntryRoundTrip(t *testing.T) {
+	enc := kvspace.EncodeExtEntry("/target")
+	if enc != ".ext=/target/" {
+		t.Errorf("encode: %q", enc)
+	}
+	dec := kvspace.DecodeExtEntry(enc)
+	if dec != "/target/" {
+		t.Errorf("decode: %q", dec)
 	}
 }
 
-func TestResolveCore_Cycle(t *testing.T) {
-	// 不应死循环，超过 40 跳后返回
-	got := kvspace.ResolveCore("/a/x", testLookup(map[string]string{"/a": "/b", "/b": "/a"}))
-	_ = got
-}
-
-func TestResolveCore_PathSuffix_Preserved(t *testing.T) {
-	got := kvspace.ResolveCore("/frame/t1/frame0/[3,-2]",
-		testLookup(map[string]string{"/frame/t1/frame0": "/func/pkg/add"}))
-	if got != "/func/pkg/add/[3,-2]" {
-		t.Errorf("got %q", got)
+func TestDecodeExtEntry_NonExt(t *testing.T) {
+	if s := kvspace.DecodeExtEntry("normal_key"); s != "" {
+		t.Errorf("expected empty, got %q", s)
 	}
 }
 
-func TestResolveCore_RootLink(t *testing.T) {
-	lk := testLookup(map[string]string{"/alias": "/real"})
-	cases := []struct{ in, want string }{
-		{"/alias", "/real"},
-		{"/alias/x", "/real/x"},
-		{"/alias/x/y/z", "/real/x/y/z"},
-		{"/other", "/other"},
-	}
-	for _, c := range cases {
-		if got := kvspace.ResolveCore(c.in, lk); got != c.want {
-			t.Errorf("ResolveCore(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-func TestResolveCore_NegativeCache(t *testing.T) {
-	lk := testLookup(map[string]string{
-		"/nodeB": "",       // 否定缓存：已确认非链接
-		"/nodeC": "/nodeA", // 正向链接
-	})
-	if got := kvspace.ResolveCore("/nodeB/x", lk); got != "/nodeB/x" {
-		t.Errorf("negative: got %q", got)
-	}
-	if got := kvspace.ResolveCore("/nodeC/x", lk); got != "/nodeA/x" {
-		t.Errorf("positive: got %q", got)
-	}
-}
-
-// TestResolveCore_FnLink 模拟 VM 帧链接（/.fn 是唯一实际使用的链接形式）
-func TestResolveCore_FnLink(t *testing.T) {
-	lk := testLookup(map[string]string{
-		"/vthread/42/[3,0]/.fn": "/func/main/add",
-	})
-	cases := []struct{ in, want string }{
-		{"/vthread/42/[3,0]/.fn/[0,0]", "/func/main/add/[0,0]"},
-		{"/vthread/42/[3,0]/.fn/[2,-1]", "/func/main/add/[2,-1]"},
-		{"/vthread/42/[3,0]/.fn/[5,1]", "/func/main/add/[5,1]"},
-		{"/func/main/add/[0,0]", "/func/main/add/[0,0]"}, // 已解析路径不变
-	}
-	for _, c := range cases {
-		if got := kvspace.ResolveCore(c.in, lk); got != c.want {
-			t.Errorf("ResolveCore(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-// ── delIndex 目录索引不变量测试（需本机 Redis，不可达则 skip）───────────────
-// 不变量：p ∈ parent/.  ⟺  parent/p 有值 或 parent/p/. 非空（fix-013）
+// ── delIndex 目录索引不变量测试（需本机 Redis）─────────────────────────────
 
 func testKV(t *testing.T) kvspace.KVSpace {
 	t.Helper()
 	kv := Conn("127.0.0.1:6379")
-	if err := kv.Set("/t13ping", kvspace.Int(1)); err != nil {
-		t.Skipf("redis unavailable: %v", err)
-	}
-	kv.Del("/t13ping")
+	kv.Clear()
 	return kv
 }
 
@@ -136,17 +88,20 @@ func contains(ss []string, want string) bool {
 	return false
 }
 
+func kvp(k string, v kvspace.XValue) kvspace.KVPair { return kvspace.KVPair{Key: k, Val: v} }
+func i64(v int64) kvspace.XValue                  { return kvspace.Int64(v) }
+
 func TestDelIndex_SiblingSurvives(t *testing.T) {
 	kv := testKV(t)
 	defer kv.DelTree("/t13a")
-	kv.Set("/t13a/b", kvspace.Int(1))
-	kv.Set("/t13a/c", kvspace.Int(2))
+	kv.Set([]kvspace.KVPair{kvp("/t13a/b", i64(1))})
+	kv.Set([]kvspace.KVPair{kvp("/t13a/c", i64(2))})
 	kv.Del("/t13a/b")
-	children, _ := kv.List("/t13a")
+	children := kv.List("/t13a")
 	if !contains(children, "c") || contains(children, "b") {
 		t.Errorf("List(/t13a) = %v, want [c]", children)
 	}
-	root, _ := kv.List("/")
+	root := kv.List("/")
 	if !contains(root, "t13a") {
 		t.Errorf("兄弟 /t13a/c 仍存活，但 t13a 被误清出根索引")
 	}
@@ -154,9 +109,9 @@ func TestDelIndex_SiblingSurvives(t *testing.T) {
 
 func TestDelIndex_CascadeCleansGhost(t *testing.T) {
 	kv := testKV(t)
-	kv.Set("/t13b/x/y", kvspace.Int(1))
+	kv.Set([]kvspace.KVPair{kvp("/t13b/x/y", i64(1))})
 	kv.Del("/t13b/x/y")
-	root, _ := kv.List("/")
+	root := kv.List("/")
 	if contains(root, "t13b") {
 		t.Errorf("空目录链未级联清理，根索引残留幽灵 t13b")
 	}
@@ -165,10 +120,10 @@ func TestDelIndex_CascadeCleansGhost(t *testing.T) {
 func TestDelIndex_ParentValueKeeps(t *testing.T) {
 	kv := testKV(t)
 	defer kv.DelTree("/t13c")
-	kv.Set("/t13c", kvspace.Int(5)) // 中间层自身有值
-	kv.Set("/t13c/k", kvspace.Int(1))
+	kv.Set([]kvspace.KVPair{kvp("/t13c", i64(5))})
+	kv.Set([]kvspace.KVPair{kvp("/t13c/k", i64(1))})
 	kv.Del("/t13c/k")
-	root, _ := kv.List("/")
+	root := kv.List("/")
 	if !contains(root, "t13c") {
 		t.Errorf("/t13c 自身有值，不应被清出根索引")
 	}
@@ -177,83 +132,131 @@ func TestDelIndex_ParentValueKeeps(t *testing.T) {
 func TestDelIndex_DirWithChildrenKept(t *testing.T) {
 	kv := testKV(t)
 	defer kv.DelTree("/t13d")
-	kv.Set("/t13d", kvspace.Int(1))
-	kv.Set("/t13d/k", kvspace.Int(2))
-	kv.Del("/t13d") // 删除有子项的目录键：值删除，目录身份保留
-	children, _ := kv.List("/t13d")
+	kv.Set([]kvspace.KVPair{kvp("/t13d", i64(1))})
+	kv.Set([]kvspace.KVPair{kvp("/t13d/k", i64(2))})
+	kv.Del("/t13d")
+	children := kv.List("/t13d")
 	if !contains(children, "k") {
 		t.Errorf("List(/t13d) = %v, want 含 k", children)
 	}
-	root, _ := kv.List("/")
+	root := kv.List("/")
 	if !contains(root, "t13d") {
 		t.Errorf("/t13d/. 非空，t13d 应保留于根索引")
 	}
 }
 
-// ── 链接删除语义测试（fix-014：末段本体、祖先穿透）──────────────────────────
+// ── Link / ExtIndex 集成测试 ───────────────────────────────────────────────
 
-func TestResolveParent_FinalNotTraversed(t *testing.T) {
-	lk := testLookup(map[string]string{"/lnk": "/tgt", "/al": "/real"})
-	cases := []struct{ in, want string }{
-		{"/lnk", "/lnk"},         // 末段是链接 → 保留本体
-		{"/al/x", "/real/x"},     // 祖先链接 → 穿透
-		{"/al/lnk", "/real/lnk"}, // 祖先穿透后，末段（哪怕也是链接名）保留
-		{"/plain", "/plain"},     // 根层键
-	}
-	for _, c := range cases {
-		if got := kvspace.ResolveParent(c.in, lk); got != c.want {
-			t.Errorf("ResolveParent(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-func TestDelLink_RemovesLinkNotTarget(t *testing.T) {
+func TestLink_GetTransparent(t *testing.T) {
 	kv := testKV(t)
-	defer func() { kv.Del("/t14tgt"); kv.Del("/t14lnk") }()
-	kv.Set("/t14tgt", kvspace.Int(1))
+	defer func() { kv.UnLink("/t14lnk"); kv.DelTree("/t14tgt") }()
+	kv.Set([]kvspace.KVPair{kvp("/t14tgt/x", i64(42))})
 	kv.Link("/t14tgt", "/t14lnk")
-	if err := kv.Del("/t14lnk"); err != nil {
-		t.Fatalf("Del(link): %v", err)
-	}
-	if v, err := kv.Get("/t14tgt"); err != nil || v.Int64() != 1 {
-		t.Errorf("target 应存活: v=%v err=%v", v, err)
-	}
-	if _, err := kv.Get("/t14lnk"); err == nil {
-		t.Errorf("链接本体应已删除")
+	v := kv.Get("/t14lnk", []string{"x"})[0]
+	if v.Int64() != 42 {
+		t.Errorf("link Get: got %d, want 42", v.Int64())
 	}
 }
 
-func TestDelThroughAncestorLink(t *testing.T) {
+func TestLink_ListTransparent(t *testing.T) {
 	kv := testKV(t)
-	defer func() { kv.DelTree("/t14real"); kv.Del("/t14al") }()
-	kv.Set("/t14real", kvspace.Int(9))
-	kv.Set("/t14real/x", kvspace.Int(7))
-	kv.Link("/t14real", "/t14al")
-	if err := kv.Del("/t14al/x"); err != nil {
-		t.Fatalf("Del(祖先链接/x): %v", err)
-	}
-	if _, err := kv.Get("/t14real/x"); err == nil {
-		t.Errorf("祖先穿透应删除 /t14real/x")
-	}
-	// 读语义穿透是全量的，Get(链接) 观察不到链接本体——
-	// 用「仍能穿透读到 target 值」证明链接存活
-	if v, err := kv.Get("/t14al"); err != nil || v.Int64() != 9 {
-		t.Errorf("链接应存活并穿透到 target: v=%v err=%v", v, err)
-	}
-}
-
-func TestDelTreeLink_OnlyUnlink(t *testing.T) {
-	kv := testKV(t)
-	defer func() { kv.DelTree("/t14tgt2"); kv.Del("/t14lnk2") }()
-	kv.Set("/t14tgt2/a", kvspace.Int(1))
+	defer func() { kv.UnLink("/t14lnk2"); kv.DelTree("/t14tgt2") }()
+	kv.Set([]kvspace.KVPair{kvp("/t14tgt2/a", i64(1))})
+	kv.Set([]kvspace.KVPair{kvp("/t14tgt2/b", i64(2))})
 	kv.Link("/t14tgt2", "/t14lnk2")
-	if err := kv.DelTree("/t14lnk2"); err != nil {
-		t.Fatalf("DelTree(link): %v", err)
+	children := kv.List("/t14lnk2")
+	if !contains(children, "a") || !contains(children, "b") {
+		t.Errorf("link List: %v, want [a b]", children)
 	}
-	if v, err := kv.Get("/t14tgt2/a"); err != nil || v.Int64() != 1 {
-		t.Errorf("target 子树应存活: v=%v err=%v", v, err)
+}
+
+func TestLink_SetTransparent(t *testing.T) {
+	kv := testKV(t)
+	defer func() { kv.UnLink("/t14lnk3"); kv.DelTree("/t14tgt3") }()
+	kv.Set([]kvspace.KVPair{kvp("/t14tgt3/x", i64(1))})
+	kv.Link("/t14tgt3", "/t14lnk3")
+	kv.Set([]kvspace.KVPair{kvp("/t14lnk3/y", i64(99))})
+	v := kv.Get("/t14tgt3", []string{"y"})[0]
+	if v.Int64() != 99 {
+		t.Errorf("link Set should write through: got %d, want 99", v.Int64())
 	}
-	if _, err := kv.Get("/t14lnk2"); err == nil {
-		t.Errorf("链接本体应已删除")
+}
+
+func TestLink_DelLinkNotTarget(t *testing.T) {
+	kv := testKV(t)
+	defer func() { kv.Del("/t14lnk4"); kv.DelTree("/t14tgt4") }()
+	kv.Set([]kvspace.KVPair{kvp("/t14tgt4", i64(1))})
+	kv.Link("/t14tgt4", "/t14lnk4")
+	kv.Del("/t14lnk4")
+	v := kv.Get("/", []string{"t14tgt4"})[0]
+	if v.Int64() != 1 {
+		t.Errorf("target 应存活: v=%d", v.Int64())
+	}
+}
+
+func TestLink_DelThroughAncestorLink(t *testing.T) {
+	kv := testKV(t)
+	defer func() { kv.UnLink("/t14al"); kv.DelTree("/t14real") }()
+	kv.Set([]kvspace.KVPair{kvp("/t14real", i64(9))})
+	kv.Set([]kvspace.KVPair{kvp("/t14real/x", i64(7))})
+	kv.Link("/t14real", "/t14al")
+	kv.Del("/t14al/x")
+	_, lst := kvspace.SepPath("/t14real/x")
+	v := kv.Get("/t14real", []string{lst})[0]
+	if !v.IsNil() {
+		t.Errorf("祖先链接穿透删除应删除 /t14real/x")
+	}
+}
+
+func TestLink_DelTreeLinkUnlinkOnly(t *testing.T) {
+	kv := testKV(t)
+	defer func() { kv.UnLink("/t14lnk5"); kv.DelTree("/t14tgt5") }()
+	kv.Set([]kvspace.KVPair{kvp("/t14tgt5/a", i64(1))})
+	kv.Link("/t14tgt5", "/t14lnk5")
+	kv.DelTree("/t14lnk5")
+	v := kv.Get("/t14tgt5", []string{"a"})[0]
+	if v.Int64() != 1 {
+		t.Errorf("target 子树应存活: v=%d", v.Int64())
+	}
+}
+
+func TestExtIndex_ReadFallthrough(t *testing.T) {
+	kv := testKV(t)
+	defer func() { kv.UnLink("/t14merge"); kv.DelTree("/t14base") }()
+	kv.Set([]kvspace.KVPair{kvp("/t14base/a", i64(1))})
+	kv.Set([]kvspace.KVPair{kvp("/t14base/b", i64(2))})
+	kv.ExtIndex("/t14merge", "/t14base")
+	v := kv.Get("/t14merge", []string{"b"})[0]
+	if v.Int64() != 2 {
+		t.Errorf("extindex read fallthrough: got %d, want 2", v.Int64())
+	}
+}
+
+func TestExtIndex_WriteUpper(t *testing.T) {
+	kv := testKV(t)
+	defer func() { kv.UnLink("/t14merge2"); kv.DelTree("/t14base2") }()
+	kv.Set([]kvspace.KVPair{kvp("/t14base2/a", i64(1))})
+	kv.ExtIndex("/t14merge2", "/t14base2")
+	kv.Set([]kvspace.KVPair{kvp("/t14merge2/a", i64(99))})
+	v := kv.Get("/t14merge2", []string{"a"})[0]
+	if v.Int64() != 99 {
+		t.Errorf("extindex write upper: got %d, want 99", v.Int64())
+	}
+	v2 := kv.Get("/t14base2", []string{"a"})[0]
+	if v2.Int64() != 1 {
+		t.Errorf("lower should be unchanged: got %d, want 1", v2.Int64())
+	}
+}
+
+func TestExtIndex_ListMerge(t *testing.T) {
+	kv := testKV(t)
+	defer func() { kv.UnLink("/t14merge3"); kv.DelTree("/t14base3") }()
+	kv.Set([]kvspace.KVPair{kvp("/t14base3/a", i64(1))})
+	kv.Set([]kvspace.KVPair{kvp("/t14base3/b", i64(2))})
+	kv.ExtIndex("/t14merge3", "/t14base3")
+	kv.Set([]kvspace.KVPair{kvp("/t14merge3/c", i64(3))})
+	children := kv.List("/t14merge3")
+	if !contains(children, "a") || !contains(children, "b") || !contains(children, "c") {
+		t.Errorf("extindex List: %v, want [a b c]", children)
 	}
 }

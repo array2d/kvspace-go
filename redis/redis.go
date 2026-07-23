@@ -30,28 +30,32 @@ func ConnPool(dsn string) kvspace.KVSpace {
 }
 
 type redisImpl struct {
-	rdb    *goredis.Client
-	linkMu sync.RWMutex
+	rdb *goredis.Client
+	mu  sync.Mutex
 }
 
-// ── KVSpace interface ──────────────────────────────────────────────────────
+// ── KVSpace interface ──────────────────────────────────────────────────────────
+
 func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
-	result := make([]kvspace.XValue, len(keys))
-	pipe := r.rdb.Pipeline()
-	type req struct {
-		idx          int
-		upper, lower string
-	}
-	var olReqs []req
-	cmds := make([]*goredis.StringCmd, len(keys))
+	chain, sets := r.resolveSets(dirKey(prefix))
+
+	// 为每个 key 定位实际存储路径
+	paths := make([]string, len(keys))
 	for i, k := range keys {
-		fullKey := kvspace.JoinPath(prefix, k)
-		cmds[i] = pipe.Get(bg, fullKey)
+		paths[i] = findInSets(prefix, k, chain, sets)
 	}
-	err := pipe.Exec(bg)
-	if err != nil {
-		panic(err)
+
+	// pipeline GET
+	pipe := r.rdb.Pipeline()
+	cmds := make([]*goredis.StringCmd, len(keys))
+	for i, p := range paths {
+		if p != "" {
+			cmds[i] = pipe.Get(bg, p)
+		}
 	}
+	_, _ = pipe.Exec(bg)
+
+	result := make([]kvspace.XValue, len(keys))
 	for i, cmd := range cmds {
 		if cmd == nil {
 			continue
@@ -71,67 +75,80 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 		if strings.HasSuffix(p.Key, kvspace.PathSep) {
 			return fmt.Errorf("kvspace: key must not end with %s: %s", kvspace.PathSep, p.Key)
 		}
-		resolved := kvspace.ResolveCore(p.Key, r.checkLink)
-		if upper, _, ok := r.resolveOL(resolved); ok {
-			resolved = upper // overlay: write to upper layer
+		prefix, last := kvspace.SepPath(p.Key)
+		dk := dirKey(prefix)
+		chain := r.resolveChain(dk)
+
+		if len(chain) > 1 && isPureLinkSet(r.getSet(chain[0])) {
+			// 纯链接：写入终端层
+			writeIdx := chain[len(chain)-1]
+			writePath := kvspace.JoinPath(kvspace.StripDirSuf(writeIdx), last)
+			pipe.SAdd(bg, writeIdx, last)
+			pipe.Set(bg, writePath, kvspace.EncodeXValue(p.Val), 0)
+			pipeIndex(pipe, writePath)
+		} else {
+			// 普通路径或 extindex：写入当前层
+			pipeIndex(pipe, p.Key)
+			pipe.Set(bg, p.Key, kvspace.EncodeXValue(p.Val), 0)
 		}
-		pipeIndex(pipe, resolved)
-		pipe.Set(bg, resolved, kvspace.EncodeXValue(p.Val), 0)
 	}
 	_, err := pipe.Exec(bg)
 	return err
 }
 
 func (r *redisImpl) List(prefix string) []string {
-	resolved := kvspace.ResolveCore(prefix, r.checkLink)
-	if upper, lower, ok := r.resolveOL(resolved); ok {
-		seen := map[string]bool{}
-		var result []string
-		for _, m := range r.rdb.SMembers(bg, dirKey(upper)).Val() {
-			if strings.HasPrefix(m, kvspace.ReservedPrefix) {
+	_, sets := r.resolveSets(dirKey(prefix))
+	seen := map[string]bool{}
+	var result []string
+	for _, members := range sets {
+		for _, m := range members {
+			if strings.HasPrefix(m, kvspace.ReservedPrefix) || seen[m] {
 				continue
 			}
 			seen[m] = true
 			result = append(result, m)
 		}
-		for _, m := range r.rdb.SMembers(bg, dirKey(lower)).Val() {
-			if seen[m] || strings.HasPrefix(m, kvspace.ReservedPrefix) {
-				continue
-			}
-			result = append(result, m)
-		}
-		for _, m := range r.rdb.SMembers(bg, dirKey(resolved)).Val() {
-			if seen[m] || strings.HasPrefix(m, kvspace.ReservedPrefix) {
-				continue
-			}
-			result = append(result, m)
-		}
-		return result
 	}
-	return r.rdb.SMembers(bg, dirKey(resolved)).Val()
+	return result
 }
 
 func (r *redisImpl) Del(keys ...string) error {
-	resolved := make([]string, len(keys))
-	for i, k := range keys {
-		resolved[i] = kvspace.ResolveParent(k, r.checkLink)
+	pipe := r.rdb.Pipeline()
+	for _, k := range keys {
+		prefix, last := kvspace.SepPath(k)
+		dk := dirKey(prefix)
+		chain, sets := r.resolveSets(dk)
+
+		if len(chain) > 1 {
+			// prefix 是 extindex：在链中定位末段归属层
+			layer, _ := findLayer(last, sets)
+			if layer >= 0 {
+				idx := chain[layer]
+				targetKey := kvspace.JoinPath(kvspace.StripDirSuf(idx), last)
+				pipe.Del(bg, targetKey)
+				pipe.SRem(bg, idx, last)
+				continue
+			}
+		}
+		// 普通删除
+		pipe.Del(bg, k)
+		pipe.SRem(bg, dk, last)
 	}
-	err := r.rdb.Del(bg, resolved...).Err()
-	r.linkMu.Lock()
-	for _, k := range resolved {
-		r.links[k] = linkEntry{checked: true, target: ""}
+	_, err := pipe.Exec(bg)
+	if err != nil {
+		return err
 	}
-	r.linkMu.Unlock()
-	for _, k := range resolved {
+	for _, k := range keys {
 		r.delIndex(k)
 	}
-	return err
+	return nil
 }
 
 func (r *redisImpl) DelTree(prefix string) error {
-	resolved := kvspace.ResolveParent(prefix, r.checkLink)
-	if r.checkLink(resolved) != "" {
-		return r.Unlink(resolved)
+	resolved := r.resolveTreeTarget(prefix)
+	if resolved != prefix {
+		// 纯链接：只删链接本体
+		return r.UnLink(prefix)
 	}
 	r.delRecursive(resolved)
 	r.delIndex(resolved)
@@ -139,7 +156,8 @@ func (r *redisImpl) DelTree(prefix string) error {
 }
 
 func (r *redisImpl) Watch(key string, timeout time.Duration) kvspace.XValue {
-	vals, err := r.rdb.BLPop(bg, timeout, kvspace.ResolveCore(key, r.checkLink)).Result()
+	resolved := r.resolveKey(key)
+	vals, err := r.rdb.BLPop(bg, timeout, resolved).Result()
 	if err != nil || len(vals) < 2 {
 		return kvspace.XValue{}
 	}
@@ -147,80 +165,140 @@ func (r *redisImpl) Watch(key string, timeout time.Duration) kvspace.XValue {
 }
 
 func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
-	return r.rdb.LPush(bg, kvspace.ResolveCore(key, r.checkLink), kvspace.EncodeXValue(val)).Err()
+	return r.rdb.LPush(bg, r.resolveKey(key), kvspace.EncodeXValue(val)).Err()
 }
 
-// ── mount ─────────────────────────────────────────────────────────────────
-
-func (r *redisImpl) Mount(target, linkpath string) error { return r.Link(target, linkpath) }
-
-func (r *redisImpl) Overlay(merge, lower, upper string) error {
-	val := kvspace.NewOverlayValue(upper, lower)
-	if err := r.Set([]kvspace.KVPair{
-		{merge, val},
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (r *redisImpl) UnMount(linkpath string) error {
-
-	if e.isOverlay {
-		r.delRecursive(e.upper)
-		r.delIndex(e.upper)
-	}
-	return r.Unlink(linkpath)
-}
-
-func (r *redisImpl) Clear() error   { return r.rdb.FlushDB(bg).Err() }
-func (r *redisImpl) DisConn() error { return r.rdb.Close() }
-
-// ── soft links (internal, used by Mount/UnMount) ──────────────────────────
-
+// ── mount ─────────────────────────────────────────────────────────────────────
 func (r *redisImpl) Link(target, linkpath string) error {
-	prefix, link := kvspace.SepPath(linkpath)
-	r.Get(prefix, []string{link})
-	val := kvspace.NewMountValue(target)
-	if err := r.rdb.Set(bg, linkpath, kvspace.EncodeXValue(val), 0).Err(); err != nil {
+
+	val := kvspace.NewExtIndexValue(target + kvspace.DirIndexSuf)
+	pipe := r.rdb.Pipeline()
+	pipe.Set(bg, linkpath, kvspace.EncodeXValue(val), 0)
+	pipe.SAdd(bg, dirKey(linkpath), kvspace.EncodeExtEntry(target))
+	_, err := pipe.Exec(bg)
+	if err != nil {
 		return err
 	}
 	r.addIndex(linkpath)
 	return nil
 }
 
-func (r *redisImpl) checkLink(path string) string {
-	return r.checkLinkEntry(path).target
+func (r *redisImpl) ExtIndex(path, extpath string) error {
+	val := kvspace.NewExtIndexValue(extpath + kvspace.DirIndexSuf)
+	pipe := r.rdb.Pipeline()
+	pipe.Set(bg, path, kvspace.EncodeXValue(val), 0)
+	pipe.SAdd(bg, dirKey(path), kvspace.EncodeExtEntry(extpath))
+	_, err := pipe.Exec(bg)
+	if err != nil {
+		return err
+	}
+	r.addIndex(path)
+	return nil
 }
 
-func (r *redisImpl) checkLinkEntry(path string) linkEntry {
-	r.linkMu.RLock()
-	e := r.links[path]
-	r.linkMu.RUnlock()
-	if e.checked {
-		return e
+func (r *redisImpl) UnLink(path string) error {
+	pipe := r.rdb.Pipeline()
+	pipe.Del(bg, path)
+	pipe.Del(bg, dirKey(path))
+	_, err := pipe.Exec(bg)
+	if err != nil {
+		return err
 	}
-	raw, _ := r.rdb.Get(bg, path).Bytes()
-	v := kvspace.DecodeXValue(raw)
-	switch {
-	case v.Kind() == kvspace.KindMount:
-		e = linkEntry{checked: true, target: kvspace.DecodeMount(v)}
-	case v.Kind() == kvspace.KindOverlay:
-		if upper, lower, ok := kvspace.DecodeOverlay(v); ok {
-			e = linkEntry{checked: true, isOverlay: true, upper: upper, lower: lower}
-		} else {
-			e = linkEntry{checked: true}
+	r.delIndex(path)
+	return nil
+}
+
+func (r *redisImpl) Clear() error   { return r.rdb.FlushDB(bg).Err() }
+func (r *redisImpl) DisConn() error { return r.rdb.Close() }
+
+// ── 索引链解析（内部）──────────────────────────────────────────────────────────
+
+func (r *redisImpl) resolveChain(dirKey string) []string {
+	return kvspace.ResolveIndexChain(dirKey, func(dk string) []string {
+		return r.rdb.SMembers(bg, dk).Val()
+	})
+}
+
+func (r *redisImpl) resolveSets(dirKey string) ([]string, [][]string) {
+	chain := r.resolveChain(dirKey)
+	sets := make([][]string, len(chain))
+	for i, dk := range chain {
+		sets[i] = r.rdb.SMembers(bg, dk).Val()
+	}
+	return chain, sets
+}
+
+func (r *redisImpl) getSet(dirKey string) []string {
+	return r.rdb.SMembers(bg, dirKey).Val()
+}
+
+// resolveKey 解析单个 key：若 prefix 是纯链接则穿透到终端。
+func (r *redisImpl) resolveKey(key string) string {
+	prefix, last := kvspace.SepPath(key)
+	dk := dirKey(prefix)
+	chain := r.resolveChain(dk)
+	if len(chain) > 1 && isPureLinkSet(r.getSet(chain[0])) {
+		idx := chain[len(chain)-1]
+		return kvspace.JoinPath(kvspace.StripDirSuf(idx), last)
+	}
+	return key
+}
+
+// resolveTreeTarget 返回 DelTree 的实际操作目标。纯链接返回自身（删链接本体）。
+func (r *redisImpl) resolveTreeTarget(prefix string) string {
+	dk := dirKey(prefix)
+	chain := r.resolveChain(dk)
+	if len(chain) > 1 && isPureLinkSet(r.getSet(chain[0])) {
+		return prefix // 纯链接：返回自身，由调用方 UnLink
+	}
+	if len(chain) > 1 {
+		return prefix // extindex：删上层
+	}
+	return prefix
+}
+
+// ── 辅助函数 ───────────────────────────────────────────────────────────────────
+
+// findInSets 在索引链中定位 key，返回实际存储路径。未找到返 ""。
+func findInSets(prefix, key string, chain []string, sets [][]string) string {
+	for i, members := range sets {
+		for _, m := range members {
+			if m == key {
+				idx := chain[i]
+				return kvspace.JoinPath(kvspace.StripDirSuf(idx), key)
+			}
 		}
-	default:
-		e = linkEntry{checked: true}
 	}
-	r.linkMu.Lock()
-	r.links[path] = e
-	r.linkMu.Unlock()
-	return e
+	return ""
 }
 
-// dirKey 返回目录索引键：parent 为 / 时返回 /，否则返回 parent/
+// findLayer 在 sets 中定位 key 所属层级索引。未找到返 -1。
+func findLayer(key string, sets [][]string) (int, int) {
+	for i, members := range sets {
+		for j, m := range members {
+			if m == key {
+				return i, j
+			}
+		}
+	}
+	return -1, -1
+}
+
+// isPureLinkSet 判定 Set 成员是否构成纯链接（只有 ext 条目，无本地数据）。
+func isPureLinkSet(members []string) bool {
+	hasData := false
+	hasExt := false
+	for _, m := range members {
+		if kvspace.DecodeExtEntry(m) != "" {
+			hasExt = true
+		} else if !strings.HasPrefix(m, kvspace.ReservedPrefix) {
+			hasData = true
+		}
+	}
+	return hasExt && !hasData
+}
+
+// dirKey 返回目录索引键。
 func dirKey(parent string) string {
 	if parent == kvspace.PathSep {
 		return kvspace.PathSep
@@ -228,11 +306,14 @@ func dirKey(parent string) string {
 	return parent + kvspace.DirIndexSuf
 }
 
-// ── index maintenance ─────────────────────────────────────────────────────
+// ── 索引维护 ───────────────────────────────────────────────────────────────────
 
 func (r *redisImpl) delRecursive(prefix string) {
 	children, _ := r.rdb.SMembers(bg, dirKey(prefix)).Result()
 	for _, c := range children {
+		if kvspace.DecodeExtEntry(c) != "" {
+			continue // extindex 条目：不递归删除 ext 目标
+		}
 		r.delRecursive(kvspace.JoinPath(prefix, c))
 	}
 	r.rdb.Del(bg, prefix, dirKey(prefix))
