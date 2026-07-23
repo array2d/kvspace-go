@@ -146,11 +146,9 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 			return fmt.Errorf("kvspace: key must not end with %s: %s", kvspace.PathSep, p.Key)
 		}
 		prefix, last := kvspace.SepPath(p.Key)
-		dk := dirKey(prefix)
-		chain := r.resolveChain(dk)
-
-		if len(chain) > 1 && kvspace.IsLink(r.getXV(prefix)) {
-			// 纯链接：写入终端层
+		if kvspace.IsLink(r.getXV(prefix)) {
+			// 纯链接：写穿透到终端
+			chain, _ := r.resolveSets(dirKey(prefix))
 			writeIdx := chain[len(chain)-1]
 			writePath := kvspace.JoinPath(kvspace.StripDirSuf(writeIdx), last)
 			pipe.Set(bg, writePath, kvspace.EncodeXValue(p.Val), 0)
@@ -275,54 +273,36 @@ func (r *redisImpl) DisConn() error { return r.rdb.Close() }
 
 // ── 索引链解析（内部）──────────────────────────────────────────────────────────
 
-func (r *redisImpl) resolveChain(dirKey string) []string {
-	chain := []string{dirKey}
-	if ext, ok := kvspace.ResolveExt(dirKey, func(dk string) []string {
-		return r.rdb.SMembers(bg, dk).Val()
-	}); ok {
-		chain = append(chain, ext)
-	}
-	return chain
-}
-
 func (r *redisImpl) resolveSets(dirKey string) ([]string, [][]string) {
 	members0 := r.rdb.SMembers(bg, dirKey).Val()
 	chain := []string{dirKey}
 	sets := [][]string{members0}
-	if ext := findExtIn(members0); ext != "" {
-		chain = append(chain, ext)
-		sets = append(sets, r.rdb.SMembers(bg, ext).Val())
-	}
-	return chain, sets
-}
-
-func findExtIn(members []string) string {
-	for _, m := range members {
-		if e := kvspace.DecodeExtEntry(m); e != "" {
-			return e
+	for _, m := range members0 {
+		if ext := kvspace.DecodeExtEntry(m); ext != "" {
+			chain = append(chain, ext)
+			sets = append(sets, r.rdb.SMembers(bg, ext).Val())
+			break
 		}
 	}
-	return ""
+	return chain, sets
 }
 
 // resolveKey 解析单个 key：若 prefix 是纯链接则穿透到终端。
 func (r *redisImpl) resolveKey(key string) string {
 	prefix, last := kvspace.SepPath(key)
-	dk := dirKey(prefix)
-	chain := r.resolveChain(dk)
-	if len(chain) > 1 && kvspace.IsLink(r.getXV(prefix)) {
-		idx := chain[len(chain)-1]
-		return kvspace.JoinPath(kvspace.StripDirSuf(idx), last)
+	if kvspace.IsLink(r.getXV(prefix)) {
+		chain, _ := r.resolveSets(dirKey(prefix))
+		if len(chain) > 1 {
+			return kvspace.JoinPath(kvspace.StripDirSuf(chain[1]), last)
+		}
 	}
 	return key
 }
 
-// resolveTreeTarget 返回 DelTree 的实际操作目标。纯链接返回自身（删链接本体）。
+// resolveTreeTarget 返回 DelTree 的实际操作目标。纯链接返回空（触发 UnLink）。
 func (r *redisImpl) resolveTreeTarget(prefix string) string {
-	dk := dirKey(prefix)
-	chain := r.resolveChain(dk)
-	if len(chain) > 1 && kvspace.IsLink(r.getXV(prefix)) {
-		return prefix
+	if kvspace.IsLink(r.getXV(prefix)) {
+		return "" // 信号：走 UnLink 分支
 	}
 	return prefix
 }
