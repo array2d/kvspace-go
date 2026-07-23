@@ -28,24 +28,33 @@ XValue 是带 kind 标签的不可变值，TLV 编码存入 Redis。
 
 TLV 编码格式。实际是 [1B kind_len][N B kind_name][4B arraylength LE][4B raw_len LE][M B raw]
 
-xvalue结构定义简单，请直接看代码
+普通xvalue结构定义简单，请直接看代码
 
+index类型的kind，value=string数组,redis-impl都用set直接实现
+
+KindIndex     = "index"，
+KindLinkIndex = "linkindex" // 纯链接，写穿透到目标
+KindExtIndex  = "extindex"  // 
 
 ### 3. Link / ExtIndex
 
-Link(target, linkpath)，link可以理解为软链接
-kind=KindLink,xvalue=存string即可"targetpath"
-    如果是普通key如target="/a/a1",linkpath="/b/b1"，读写均跳转"/b/b1"
-    如果目录,如extindex="/a/a2/",exttargetindex="/lib/funca/"，下级key(如如 "/a/a2/be")的读写访问，均跳转/lib/funca/be
+Link(target, linkpath)，link可以理解为文件系统软链接
+kind=KindLink,xvalue=存string即可"targetpath"，link来说，target和linkpath要么都是值key，要么都是目录key以/结尾。
+
 
 ExtIndex(path, extpath)，ExtIndex可以理解为写时复制的叠加层
+    只能是目录,如extindex="/a/a2/",exttargetindex="/lib/funca/"，下级key(如如 "/a/a2/be")的读写访问，均跳转/lib/funca/be
+ExtIndex是index，exttargetindex也是index，key必须都以/结尾
 key不容许在2者重复！（extIndex自身存在的key，不容许出现在exttargetindex中）所以读操作覆盖二者，下级成员的写/创建/删除操作都只更新extIndex自身
-逻辑上，我们通常不对extIndex/下的只读路径执行任何写操作，一旦操作，需要直接报错
-kind=KindExtIndex,xvalue存字符串数组的bytes["->exttargetindex_path"，"node1","node2","node3","node4",]，对redis-impl直接用set
-只容许有1个ext,数组实现下exttargetindex_path必须是首个。
+逻辑上，我们通常不对extIndex/下的只读路径执行任何写操作，一旦操作，需要直接panic，警告开发者，强制修改
+kind=KindExtIndex,xvalue存字符串数组的bytes["-->exttargetindex_path"，"node1","node2","node3","node4",]，对redis-impl直接用set
+只容许有1个exttargetindex,数组实现下exttargetindex_path必须是首个。
 extindex 不容许级联,exttargetindex必须是普通index
+-->分隔符定义在const文件！
 
 ## 第二部分：操作与索引
+
+完成后补充
 
 ## 第三部分：辅助设施
 
@@ -69,3 +78,6 @@ go-redis Hook 在每条命令前后记录，pipeline 显示批次数和总耗时
 tutorial/ 下的 .sh 脚本头部 `# expected:` 注释预期输出，test.py 自动执行并对比。
 
 `make build` 编译 kvspace 到 `~/.local/bin/kvspace`。
+
+### 11.严禁hardcode
+不容许grep到乱丢的字符串，必须集中在const.go
