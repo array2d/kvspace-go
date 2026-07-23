@@ -22,7 +22,7 @@ func main() {
 	dsn := fs.String("kvspace", defaultKVSpace(), "kvspace DSN (redis://host:port)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvspace [--kvspace dsn] <subcommand> [args]")
-		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree link unlink extindex list tree dump watch notify clear")
+		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mkindex link unlink extindex list tree dump watch notify clear")
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[1:])
@@ -43,7 +43,7 @@ func main() {
 			} else if pfx != kvspace.PathSep {
 				pfx += kvspace.DirIndexSuf
 			}
-			v := kv.Get(pfx, []string{lst})[0]
+			v := kvspace.GetOne(kv, pfx, lst)
 			if v.IsNil() { fmt.Printf("%s\t(nil)\n", k) } else { fmt.Printf("%s\t%s\n", k, v) }
 		}
 	case "set":
@@ -57,6 +57,9 @@ func main() {
 	case "deltree":
 		if len(sub) < 2 { exitUsage("kvspace deltree <prefix>") }
 		if err := kv.DelTree(sub[1]); err != nil { fatalf("%v", err) }
+	case "mkindex":
+		if len(sub) < 2 { exitUsage("kvspace mkindex <path>") }
+		if err := kv.Mkindex(ensureDirSuf(sub[1])); err != nil { fatalf("%v", err) }
 	case "link":
 		if len(sub) < 3 { exitUsage("kvspace link <target> <linkpath>") }
 		if err := kv.Link(sub[1], sub[2]); err != nil { fatalf("%v", err) }
