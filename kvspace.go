@@ -44,9 +44,9 @@ type KVSpace interface {
 	Watch(key string, timeout time.Duration) XValue // 阻塞等待通知
 
 	// ── mount系统 ───────────────────────────────────────────────────────────
-	Mount(target, linkpath string) error      // 创建路径映射linkpath → target
-	Overlay(merge, lower, upper string) error // 创建overlay,访问merge/→先查upper/→回落lower/
-	UnMount(linkpath string) error            // 删除链接linkpath
+	Link(target, linkpath string) error  // 创建路径映射 linkpath → target，纯链接
+	ExtIndex(path, extpath string) error // 创建扩展索引，path 为写层，extpath 为只读扩展
+	UnLink(path string) error            // 移除 extindex
 
 	// ── 生命周期 ─────────────────────────────────────────────────────────
 	// 范围警示：redis 实现 = FLUSHDB，清空所在 db 的全部键——共享 Redis 实例时会波及非 kvlang 数据。
@@ -60,6 +60,14 @@ func JoinPath(parent, child string) string {
 		return PathSep + child
 	}
 	return parent + PathSep + child
+}
+
+// StripDirSuf 去掉目录索引键的尾 /：/a/ → /a，/ → /。
+func StripDirSuf(p string) string {
+	if p == PathSep {
+		return PathSep
+	}
+	return p[:len(p)-1]
 }
 
 func SepPath(path string) (prefix, last string) {
@@ -76,9 +84,12 @@ func SepPath(path string) (prefix, last string) {
 // Walk 递归遍历 prefix 下的 KV 树，对每个节点调用 fn(path, value)。
 // 节点无值时 value 为 nil；遍历顺序为深度优先。
 func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
-	vals := kv.Get([]string{prefix})
-	if len(vals) > 0 && !vals[0].IsNil() {
-		fn(prefix, vals[0])
+	if prefix != PathSep {
+		parent, last := SepPath(prefix)
+		vals := kv.Get(parent, []string{last})
+		if len(vals) > 0 && !vals[0].IsNil() {
+			fn(prefix, vals[0])
+		}
 	}
 	for _, c := range kv.List(prefix) {
 		Walk(kv, JoinPath(prefix, c), fn)
