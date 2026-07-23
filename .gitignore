@@ -5,3 +5,6 @@
 .omc/
 
 .idea/
+
+# Redis
+dump.rdb
