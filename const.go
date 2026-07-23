@@ -8,7 +8,6 @@ const (
 	ReservedPrefix = "." // 引擎保留字段前缀，List 时隐藏
 	ExtIndexSep    = "=" // extindex 引用分隔符，如 .ext=/target/
 	ExtIndexTag    = ".ext" // dir Set 中 extindex 引用的保留条目名
-	ExtMaxHops     = 40    // extindex 链最大跳数，防环
 )
 
 // ── XValue kind ──────────────────────────────────────────────────────────────
@@ -30,5 +29,6 @@ const (
 	KindBytes    = "bytes"
 	KindArray1d  = "array1d"
 	KindDict     = "dict"
-	KindExtIndex = "extindex" // 路径持有 extindex 引用，raw 编码扩展目标路径
+	KindLink     = "link"     // 纯链接，写穿透到目标
+	KindExtIndex = "extindex" // 扩展索引，写留在上层
 )
