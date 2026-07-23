@@ -62,14 +62,6 @@ func JoinPath(parent, child string) string {
 	return parent + PathSep + child
 }
 
-// StripDirSuf 去掉目录索引键的尾 /：/a/ → /a，/ → /。
-func StripDirSuf(p string) string {
-	if p == PathSep {
-		return PathSep
-	}
-	return p[:len(p)-1]
-}
-
 func SepPath(path string) (prefix, last string) {
 	if path == PathSep {
 		return PathSep, ""
