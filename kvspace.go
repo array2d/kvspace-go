@@ -43,6 +43,9 @@ type KVSpace interface {
 	Notify(key string, val XValue) error            // 投递一次性通知信号
 	Watch(key string, timeout time.Duration) XValue // 阻塞等待通知
 
+	// ── 目录创建 ─────────────────────────────────────────────────────────
+	Mkindex(path string) error // 递归创建目录，类似 mkdir -p；path 须以 / 结尾
+
 	// ── mount系统 ───────────────────────────────────────────────────────────
 	Link(target, linkpath string) error  // 创建路径映射 linkpath → target，纯链接
 	ExtIndex(path, extpath string) error // 创建扩展索引，path 为写层，extpath 为只读扩展
@@ -53,6 +56,9 @@ type KVSpace interface {
 	Clear() error
 	DisConn() error
 }
+
+// GetOne 获取单个 key 的值，缺失返回 Null()。
+func GetOne(kv KVSpace, prefix, key string) XValue { return kv.Get(prefix, []string{key})[0] }
 
 // JoinPath 连接父路径与子名，父路径已含尾 / 时不重复插入。
 func JoinPath(parent, child string) string {
