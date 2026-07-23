@@ -6,12 +6,12 @@ import "strings"
 
 // NewLinkValue 返回 link XValue：kind="link", raw=target 路径。
 func NewLinkValue(target string) XValue {
-	return Raw(KindLink, []byte(target))
+	return Raw(KindLinkIndex, []byte(target))
 }
 
 // DecodeLink 从 link XValue 提取目标路径。非 link kind 返回空串。
 func DecodeLink(v XValue) string {
-	if v.Kind() != KindLink { return "" }
+	if v.Kind() != KindLinkIndex { return "" }
 	return string(v.RawBytes())
 }
 
@@ -27,15 +27,18 @@ func DecodeExtIndex(v XValue) string {
 }
 
 // HasExtRef 判定 XValue 是否持有 extindex 引用（link 或 extindex）。
-func HasExtRef(v XValue) bool { return v.Kind() == KindLink || v.Kind() == KindExtIndex }
+func HasExtRef(v XValue) bool { return v.Kind() == KindLinkIndex || v.Kind() == KindExtIndex }
 
 // IsLink 判定 XValue 是否为纯链接。
-func IsLink(v XValue) bool { return v.Kind() == KindLink }
+func IsLink(v XValue) bool { return v.Kind() == KindLinkIndex }
 
 // ── Dir Set extindex 条目编解码 ──────────────────────────────────────────────
 
 // EncodeExtEntry 编码 dir Set 中的 extindex 条目，如 ".ext=/target/"。
 func EncodeExtEntry(extpath string) string {
+	if strings.HasSuffix(extpath, DirIndexSuf) {
+		return ExtIndexTag + ExtIndexSep + extpath
+	}
 	return ExtIndexTag + ExtIndexSep + extpath + DirIndexSuf
 }
 

@@ -54,10 +54,13 @@ type KVSpace interface {
 	DisConn() error
 }
 
-// JoinPath 连接父路径与子名，避免根路径产生 //。
+// JoinPath 连接父路径与子名，父路径已含尾 / 时不重复插入。
 func JoinPath(parent, child string) string {
 	if parent == PathSep {
 		return PathSep + child
+	}
+	if strings.HasSuffix(parent, PathSep) {
+		return parent + child
 	}
 	return parent + PathSep + child
 }
@@ -73,17 +76,22 @@ func SepPath(path string) (prefix, last string) {
 	return path[:i], path[i+1:]
 }
 
-// Walk 递归遍历 prefix 下的 KV 树，对每个节点调用 fn(path, value)。
-// 节点无值时 value 为 nil；遍历顺序为深度优先。
+// Walk 递归遍历 prefix 下的树。prefix 须以 / 结尾。
 func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
 	if prefix != PathSep {
-		parent, last := SepPath(prefix)
-		vals := kv.Get(parent, []string{last})
+		clean := prefix[:len(prefix)-1]
+		p, l := SepPath(clean)
+		if p == "" {
+			p = PathSep
+		} else if p != PathSep {
+			p += DirIndexSuf
+		}
+		vals := kv.Get(p, []string{l})
 		if len(vals) > 0 && !vals[0].IsNil() {
-			fn(prefix, vals[0])
+			fn(clean, vals[0])
 		}
 	}
 	for _, c := range kv.List(prefix) {
-		Walk(kv, JoinPath(prefix, c), fn)
+		Walk(kv, JoinPath(prefix, c)+DirIndexSuf, fn)
 	}
 }
