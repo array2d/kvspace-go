@@ -1,5 +1,11 @@
 # KVSpace 设计与实现
 
+## 第零部分:我的原则
+
+绝对上帝设计美学：代码必须按我定义的清晰优雅的方式运行，非我的定义，直接error/panic，不容许控制流包庇错误。
+绝不容许代码以奇怪的方式成功运行，就像用四个乳头走路的牛，必须立即杀死这样的牛。
+写代码要像疯子一样洁癖偏执，让代码走唯一的正确方向，其它方向直接error/panic，就像大树只容许主干向上生长，要砍掉所有分支，这些分支都是累赘！是bug的温床！。
+
 ## 第一部分：基础模型
 
 ### 1. 核心概念
@@ -52,32 +58,40 @@ kind=KindExtIndex,xvalue存字符串数组的bytes["-->exttargetindex_path"，"n
 extindex 不容许级联,exttargetindex必须是普通index
 -->分隔符定义在const文件！
 
+ExtIndex是kvlang的函数调用开辟新栈的需求，中间变量需要写入ExtIndex，而指令则直接来自/lib/funca/下
+
+### 4.kvspace
+kvspace是一个完全分布式的元数据存储，禁止kvspace client本地存储任何信息。
+
 ## 第二部分：操作与索引
+
+kvspace tree
+    对子成员中的二维地址[s0,s1],需要用table打印。这是kvlang所需要的重要的栈指令二维布局，二维打印更直观。
 
 完成后补充
 
 ## 第三部分：辅助设施
 
-### 7. Watch / Notify
+### 1. Watch / Notify
 
 redis-impl
 Watch/Notify 用 Redis BLPOP/LPUSH 实现一次性通知，link 路径穿透解析。
 
-### 8. 编码与工具函数
+### 2. 编码与工具函数
 
 `StripDirSuf` 去目录索引尾 `/`，`JoinPath` 拼路径避免 `//`，`SepPath` 拆路径为前缀+末段。
 
-### 9. Redis 日志
+### 3. Redis 日志
 
 Redis 日志由 `KVSPACE_REDIS_LOG` 控制等级：1=命令名，2=完整参数+耗时。
 
 go-redis Hook 在每条命令前后记录，pipeline 显示批次数和总耗时。
 
-### 10. 测试与构建
+### 4. 测试与构建
 
 tutorial/ 下的 .sh 脚本头部 `# expected:` 注释预期输出，test.py 自动执行并对比。
 
 `make build` 编译 kvspace 到 `~/.local/bin/kvspace`。
 
-### 11.严禁hardcode
+### 5.严禁hardcode
 不容许grep到乱丢的字符串，必须集中在const.go
