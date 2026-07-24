@@ -1,10 +1,7 @@
 // Package kvspace 抽象 KV 存储。
 package kvspace
 
-import (
-	"strings"
-	"time"
-)
+import "time"
 
 // KVPair 用于批量写入，顺序确定（非 map）。
 type KVPair struct {
@@ -55,78 +52,4 @@ type KVSpace interface {
 	// 范围警示：redis 实现 = FLUSHDB，清空所在 db 的全部键——共享 Redis 实例时会波及非 kvlang 数据。
 	Clear() error
 	DisConn() error
-}
-
-// JoinPath 连接父路径与子名，父路径已含尾 / 时不重复插入。
-func JoinPath(parent, child string) string {
-	if parent == PathSep {
-		return PathSep + child
-	}
-	if strings.HasSuffix(parent, PathSep) {
-		return parent + child
-	}
-	return parent + PathSep + child
-}
-
-func SepPath(path string) (prefix, last string) {
-	if path == PathSep {
-		return PathSep, ""
-	}
-	i := strings.LastIndexByte(path, PathSep[0])
-	if i == 0 {
-		return PathSep, path[1:]
-	}
-	return path[:i], path[i+1:]
-}
-
-// MkIndexRecursive 递归创建目录，已存在的目录跳过。
-func MkIndexRecursive(kv KVSpace, path string) {
-	if !strings.HasSuffix(path, DirIndexSuf) {
-		panic("MkIndex: path must end with " + DirIndexSuf)
-	}
-	for i := 1; i < len(path); {
-		j := strings.IndexByte(path[i:], '/')
-		if j < 0 { break }
-		i += j + 1
-		dir := path[:i]
-		p, n := SepPath(dir[:len(dir)-1])
-		if p != PathSep { p += DirIndexSuf }
-		if !dirExists(kv, p, n) {
-			kv.Set([]KVPair{{dir, Raw(KindIndex, nil)}})
-		}
-	}
-}
-
-func dirExists(kv KVSpace, parentDir, name string) bool {
-	for _, m := range kv.List(parentDir) {
-		if m == name { return true }
-	}
-	return false
-}
-
-// GetOne 读取单个 key 的便捷方法。
-func GetOne(kv KVSpace, key string) XValue {
-	p, l := SepPath(key)
-	if p != PathSep { p += DirIndexSuf }
-	return kv.Get(p, []string{l})[0]
-}
-
-// Walk 递归遍历 prefix 下的树。prefix 须以 / 结尾。
-func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
-	if prefix != PathSep {
-		clean := prefix[:len(prefix)-1]
-		p, l := SepPath(clean)
-		if p == "" {
-			p = PathSep
-		} else if p != PathSep {
-			p += DirIndexSuf
-		}
-		vals := kv.Get(p, []string{l})
-		if len(vals) > 0 && !vals[0].IsNil() {
-			fn(clean, vals[0])
-		}
-	}
-	for _, c := range kv.List(prefix) {
-		Walk(kv, JoinPath(prefix, c)+DirIndexSuf, fn)
-	}
 }

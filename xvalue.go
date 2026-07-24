@@ -75,6 +75,8 @@ func (v XValue) String() string {
 		return tag + ":" + strconv.FormatInt(v.TimeNs(), 10)
 	case "rwir":
 		return "rwir:" + string(v.raw)
+	case KindLinkIndex:
+		return "→" + string(v.raw)
 	default:
 		return tag + ":" + string(v.raw)
 	}

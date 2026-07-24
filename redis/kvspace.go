@@ -71,8 +71,7 @@ func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
 func (r *redisImpl) readDirIndex(ctx context.Context, dir string) []string {
 	data, err := r.rdb.Get(ctx, dir).Bytes()
 	if err != nil {
-		if err == goredis.Nil { return nil }
-		panic(fmt.Errorf("%w: readDirIndex %s err=%v", kvspace.ErrGet, dir, err))
+		return nil
 	}
 	v := kvspace.DecodeXValue(data)
 	switch v.Kind() {
@@ -160,7 +159,6 @@ func (r *redisImpl) Mkindex(path string) error {
 			continue
 		}
 		parent, name := parentName(cur)
-		r.ensureParent(ctx, parent, name)
 		pipe := r.rdb.Pipeline()
 		r.addChild(ctx, pipe, parent, name)
 		if _, err := pipe.Exec(ctx); err != nil {
@@ -193,7 +191,7 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 
 func (r *redisImpl) setFile(ctx context.Context, pipe goredis.Pipeliner, path string, val kvspace.XValue) {
 	parent, name := parentName(path)
-	r.ensureParent(ctx, parent, name)
+	kvspace.MkIndexRecursive(r, parent)
 
 	var extT string
 	if data, err := r.rdb.Get(ctx, parent).Bytes(); err == nil {
@@ -223,7 +221,7 @@ func (r *redisImpl) setFile(ctx context.Context, pipe goredis.Pipeliner, path st
 
 func (r *redisImpl) setDir(ctx context.Context, pipe goredis.Pipeliner, path string, val kvspace.XValue) {
 	parent, name := parentName(path)
-	r.ensureParent(ctx, parent, name)
+	kvspace.MkIndexRecursive(r, parent)
 
 	pipe.Set(ctx, path, kvspace.EncodeXValue(val), 0)
 	r.addChild(ctx, pipe, parent, name)
@@ -384,7 +382,7 @@ func (r *redisImpl) Link(target, linkpath string) error {
 	}
 
 	parent, name := parentName(resolved)
-	r.ensureParent(ctx, parent, name)
+	kvspace.MkIndexRecursive(r, parent)
 
 	pipe := r.rdb.Pipeline()
 	pipe.Set(ctx, storeKey, kvspace.EncodeXValue(kvspace.NewLinkValue(target)), 0)
@@ -409,7 +407,7 @@ func (r *redisImpl) ExtIndex(path, extpath string) error {
 
 	resolved := r.resolveParent(ctx, path)
 	parent, name := parentName(resolved)
-	r.ensureParent(ctx, parent, name)
+	kvspace.MkIndexRecursive(r, parent)
 
 	pipe := r.rdb.Pipeline()
 	val := kvspace.NewExtIndexValue(nil, extpath)

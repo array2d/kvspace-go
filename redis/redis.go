@@ -137,41 +137,6 @@ func (r *redisImpl) extIndex(ctx context.Context, dir string)(values []string, e
 	return
 }
 
-func (r *redisImpl) ensureParent(ctx context.Context, parent, child string) {
-	if parent == kvspace.PathSep {
-		return
-	}
-	if !isDir(parent) {
-		panic(fmt.Errorf("%w: %s", kvspace.ErrNotDir, parent))
-	}
-	gp, pn := parentName(parent)
-	nodes := r.readDirIndex(ctx, gp)
-	for _, n := range nodes {
-		if n == pn {
-			return
-		}
-	}
-
-	// 检查 exttarget：父目录可能在 extIndex 的只读层
-	var extT string
-	if data, err := r.rdb.Get(ctx, gp).Bytes(); err == nil {
-		if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
-			_, extT = kvspace.DecodeExtIndex(v)
-		}
-	}
-	if extT != "" {
-		extNodes := r.readDirIndex(ctx, extT)
-		for _, n := range extNodes {
-			if n == pn {
-				// 在 extIndex 本地层创建影子目录
-				nodes = append(nodes, pn)
-				r.rdb.Set(ctx, gp, kvspace.EncodeXValue(kvspace.NewIndexValue(nodes)), 0)
-				return
-			}
-		}
-	}
-	panic(fmt.Errorf("%w: %s", kvspace.ErrParentNotFound, parent))
-}
 
 func (r *redisImpl) collectKeys(ctx context.Context, prefix string) []string {
 	pattern := prefix + "*"

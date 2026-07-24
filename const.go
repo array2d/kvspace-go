@@ -7,7 +7,7 @@ const (
 	DirIndexSuf    = "/"    // 目录索引键后缀（尾斜杠 = 目录，必须以 / 开头的 key 保证不冲突）
 	ReservedPrefix = "."    // 引擎保留字段前缀，List 时隐藏
 	IndexValueSep= "\n"    // index XValue 中的路径分隔符
-	ExtIndexHead = "=" // extindex XValue bytes 首元素前缀，如 =/lib/init/
+	ExtIndexHead = "…" // extindex XValue bytes 首元素前缀，如 …/lib/init/
 )
 
 var (
