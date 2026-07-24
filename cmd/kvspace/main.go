@@ -199,23 +199,46 @@ func printTree(kv kvspace.KVSpace, prefix, indent string, showExt bool) {
 	if len(slots) > 0 {
 		printSlotTable(kv, prefix, indent, slots)
 	}
-	for i, c := range nonslots {
-		last := i == len(nonslots)-1
-		branch := "├── "
-		if last {
-			branch = "└── "
-		}
+
+	type treeItem struct {
+		name        string
+		val         kvspace.XValue
+		childDir    string
+	}
+	var items []treeItem
+	for _, c := range nonslots {
 		v := getAt(kv, prefix, c)
-		if !v.IsNil() {
-			fmt.Printf("%s%s%s\t%s\n", indent, branch, c, v)
+		childDir := kvspace.JoinPath(prefix, c) + kvspace.DirIndexSuf
+		hasDir := len(kv.List(childDir)) > 0
+		if !hasDir {
+			dirV := getAt(kv, prefix, c+kvspace.DirIndexSuf)
+			hasDir = !dirV.IsNil()
+		}
+		if hasDir {
+			if !v.IsNil() {
+				items = append(items, treeItem{c + kvspace.DirIndexSuf, kvspace.XValue{}, childDir})
+				items = append(items, treeItem{c, v, ""})
+			} else {
+				items = append(items, treeItem{c + kvspace.DirIndexSuf, kvspace.XValue{}, childDir})
+			}
 		} else {
-			fmt.Printf("%s%s%s\n", indent, branch, c)
+			items = append(items, treeItem{c, v, ""})
+		}
+	}
+	for i, it := range items {
+		last := i == len(items)-1
+		branch := "├── "
+		if last { branch = "└── " }
+		if !it.val.IsNil() {
+			fmt.Printf("%s%s%s\t%s\n", indent, branch, it.name, it.val)
+		} else {
+			fmt.Printf("%s%s%s\n", indent, branch, it.name)
 		}
 		next := indent + "│   "
-		if last {
-			next = indent + "    "
+		if last { next = indent + "    " }
+		if it.childDir != "" {
+			printTree(kv, it.childDir, next, showExt)
 		}
-		printTree(kv, kvspace.JoinPath(prefix, c)+kvspace.DirIndexSuf, next, showExt)
 	}
 }
 
