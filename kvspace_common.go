@@ -70,6 +70,26 @@ func StripExtChildren(kv KVSpace, prefix string, children []string) []string {
 	return children[:len(children)-len(extChildren)]
 }
 
+// FprintList 打印 prefix 的直接子项。
+// showExt=false 时，先打印自己的 children，再以 =exttarget/ 标记缩进打印 ext 子项。
+func FprintList(w io.Writer, kv KVSpace, prefix string, showExt bool) {
+	children := kv.List(prefix)
+	if !showExt {
+		children = StripExtChildren(kv, prefix, children)
+	}
+	for _, c := range children {
+		fmt.Fprintln(w, c)
+	}
+	if !showExt {
+		if ext := ReadPrefixExt(kv, prefix); ext != "" {
+			fmt.Fprintln(w, ExtIndexHead+ext)
+			for _, c := range kv.List(ext) {
+				fmt.Fprintln(w, "  "+c)
+			}
+		}
+	}
+}
+
 // ── tree helpers ──────────────────────────────────────────────────────────
 
 func GetAt(kv KVSpace, dir, name string) XValue {

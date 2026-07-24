@@ -63,8 +63,7 @@ func main() {
 		if len(sub) < 3 { exitUsage("kvspace extindex <path> <extpath>") }
 		if err := kv.ExtIndex(sub[1], sub[2]); err != nil { fatalf("%v", err) }
 	case "list":
-		if len(sub) < 2 { exitUsage("kvspace list <prefix>") }
-		for _, c := range kv.List(sub[1]) { fmt.Println(c) }
+		cmdList(kv, sub[1:])
 	case "tree":
 		cmdTree(kv, sub[1:])
 	case "dump":
@@ -89,6 +88,18 @@ func main() {
 
 func exitUsage(msg string)    { fmt.Fprintln(os.Stderr, "usage:", msg); os.Exit(1) }
 func fatalf(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...); os.Exit(1) }
+
+func cmdList(kv kvspace.KVSpace, args []string) {
+	fs := flag.NewFlagSet("list", flag.ExitOnError)
+	showExt := fs.Bool("showext", true, "include extindex entries")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: kvspace list [--showext] <prefix>")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() == 0 { fs.Usage(); os.Exit(1) }
+	kvspace.FprintList(os.Stdout, kv, fs.Arg(0), *showExt)
+}
 
 func cmdWatch(kv kvspace.KVSpace, args []string) {
 	fs := flag.NewFlagSet("watch", flag.ExitOnError)
