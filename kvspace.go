@@ -82,6 +82,38 @@ func SepPath(path string) (prefix, last string) {
 	return path[:i], path[i+1:]
 }
 
+// MkIndexRecursive 递归创建目录，已存在的目录跳过。
+func MkIndexRecursive(kv KVSpace, path string) {
+	if !strings.HasSuffix(path, DirIndexSuf) {
+		panic("MkIndex: path must end with " + DirIndexSuf)
+	}
+	for i := 1; i < len(path); {
+		j := strings.IndexByte(path[i:], '/')
+		if j < 0 { break }
+		i += j + 1
+		dir := path[:i]
+		p, n := SepPath(dir[:len(dir)-1])
+		if p != PathSep { p += DirIndexSuf }
+		if !dirExists(kv, p, n) {
+			kv.Set([]KVPair{{dir, Raw(KindIndex, nil)}})
+		}
+	}
+}
+
+func dirExists(kv KVSpace, parentDir, name string) bool {
+	for _, m := range kv.List(parentDir) {
+		if m == name { return true }
+	}
+	return false
+}
+
+// GetOne 读取单个 key 的便捷方法。
+func GetOne(kv KVSpace, key string) XValue {
+	p, l := SepPath(key)
+	if p != PathSep { p += DirIndexSuf }
+	return kv.Get(p, []string{l})[0]
+}
+
 // Walk 递归遍历 prefix 下的树。prefix 须以 / 结尾。
 func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
 	if prefix != PathSep {
