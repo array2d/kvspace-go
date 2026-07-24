@@ -21,6 +21,7 @@
 
 set -e
 KV="$HOME/.local/bin/kvspace"
+$KV deltree /t/
 $KV set /t/ index:
 
 echo "=== int ==="
@@ -49,5 +50,3 @@ $KV get /t/empty /t/space /t/unicode
 echo "=== nil ==="
 $KV set /t/nothing nil:
 $KV get /t/nothing
-
-$KV deltree /t

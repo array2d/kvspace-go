@@ -17,6 +17,7 @@
 
 set -e
 KV="$HOME/.local/bin/kvspace"
+$KV deltree /b/
 
 $KV set /b/ index:
 $KV set /b/a/ index:
@@ -45,6 +46,4 @@ $KV set /b/e/b int:5
 $KV set /b/f/c int:6
 $KV del /b/d/a /b/e/b
 $KV get /b/d/a /b/e/b /b/f/c
-$KV list /b/f
-
-$KV deltree /b
+$KV list /b/f/

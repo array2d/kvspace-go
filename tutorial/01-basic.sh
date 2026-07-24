@@ -16,11 +16,11 @@
 # /t01/a	(nil)
 # b
 # c
-# === DelTree ===
 # /end
 
 set -e
 KV="$HOME/.local/bin/kvspace"
+$KV deltree /t01/
 
 echo "=== Set & Get ==="
 $KV set /t01/ index:
@@ -30,7 +30,7 @@ $KV get /t01/a
 echo "=== Set & List ==="
 $KV set /t01/b int:7
 $KV set /t01/c string:hello
-$KV list /t01
+$KV list /t01/
 
 echo "=== Get bulk ==="
 $KV get /t01/a /t01/b /t01/c
@@ -41,8 +41,4 @@ $KV get /t01/nonexist
 echo "=== Del ==="
 $KV del /t01/a
 $KV get /t01/a
-$KV list /t01
-
-echo "=== DelTree ==="
-$KV deltree /t01
-$KV list /t01
+$KV list /t01/

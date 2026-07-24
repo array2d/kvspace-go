@@ -11,7 +11,7 @@
 ### 1. 核心概念
 
 + 值key：也叫文件，普通key
-+ 索引key：也叫目录，index，包括extindex。其xvalue bytes内存储着下级目录成员列表，用换行符(\\n)拼接成员路径，以 Redis string SET 命令存储。不再使用 Redis Set 数据结构。
++ 索引key：也叫目录，index，包括extindex。其xvalue bytes内存储着下级目录直接子名列表，用换行符(\\n)拼接，以 Redis string SET 命令存储。不再使用 Redis Set 数据结构。
 
 KVSpace 是文件系统风格的 KV 存储抽象，当前是Rediscli实现。
 

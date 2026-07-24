@@ -11,6 +11,7 @@
 
 set -e
 KV="$HOME/.local/bin/kvspace"
+$KV deltree /e/
 $KV set /e/ index:
 
 echo "=== overwrite kind ==="
@@ -20,13 +21,11 @@ $KV set /e/v string:hello
 $KV get /e/v
 
 echo "=== empty list ==="
-$KV list /e/empty
+$KV list /e/empty/
 
 echo "=== del non-existent ==="
 $KV del /e/ghost
 $KV get /e/ghost
 
 echo "=== deltree non-existent ==="
-$KV deltree /e/nonexist
-
-$KV deltree /e
+$KV deltree /e/nonexist/

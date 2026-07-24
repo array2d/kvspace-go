@@ -25,6 +25,7 @@
 
 set -e
 KV="$HOME/.local/bin/kvspace"
+$KV deltree /tgt/
 
 $KV set /tgt/ index:
 $KV set /tgt/x int:42
@@ -36,21 +37,19 @@ echo "=== read through ==="
 $KV get /lnk/x /lnk/y
 
 echo "=== list through ==="
-$KV list /lnk
+$KV list /lnk/
 
 echo "=== write through ==="
 $KV set /lnk/w int:99
 $KV get /tgt/w
-$KV list /tgt
+$KV list /tgt/
 
 echo "=== del through link ==="
 $KV del /lnk/y
 $KV get /tgt/y
-$KV list /tgt
+$KV list /tgt/
 
 echo "=== del link body ==="
 $KV del /lnk
 $KV get /lnk
 $KV get /tgt/x
-
-$KV deltree /tgt

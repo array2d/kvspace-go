@@ -33,6 +33,8 @@
 
 set -e
 KV="$HOME/.local/bin/kvspace"
+$KV deltree /base/
+$KV deltree /merge/
 
 $KV set /base/ index:
 $KV set /base/a int:1
@@ -49,12 +51,12 @@ $KV get /merge/z
 $KV get /base/z
 
 echo "=== list merge ==="
-$KV list /merge
+$KV list /merge/
 
 echo "=== del upper key ==="
 $KV del /merge/z
 $KV get /merge/z
-$KV list /merge
+$KV list /merge/
 
 echo "=== nested write ==="
 $KV set /merge/nest/ index:
@@ -62,12 +64,10 @@ $KV set /merge/nest/x int:42
 $KV set /merge/nest/y int:43
 $KV get /merge/nest/x /merge/nest/y
 $KV get /base/nest/x
-$KV list /merge/nest
+$KV list /merge/nest/
 
 echo "=== deltree preserves base ==="
-$KV deltree /merge
+$KV deltree /merge/
 $KV get /merge/a
 $KV get /base/a
-$KV list /base
-
-$KV deltree /base
+$KV list /base/

@@ -17,6 +17,7 @@
 
 set -e
 KV="$HOME/.local/bin/kvspace"
+$KV deltree /deep/
 
 echo "=== deep tree ==="
 $KV set /deep/ index:
@@ -27,21 +28,19 @@ $KV set /deep/a/b/c/d/ index:
 $KV set /deep/a/b/c/d/e/ index:
 $KV set /deep/a/b/c/d/e/f int:6
 $KV get /deep/a/b/c/d/e/f
-$KV list /deep
+$KV list /deep/
 $KV set /deep/a/b/c int:3
 $KV get /deep/a/b/c
-$KV list /deep/a/b/c
-$KV list /deep/a/b
+$KV list /deep/a/b/c/
+$KV list /deep/a/b/
 
 echo "=== deltree mid ==="
-$KV deltree /deep/a/b/c/d/e
+$KV deltree /deep/a/b/c/d/e/
 $KV get /deep/a/b/c/d/e/f
 $KV get /deep/a/b/c/d/e
 $KV get /deep/a/b/c
 
 echo "=== deltree leaf ==="
-$KV deltree /deep/a/b
+$KV deltree /deep/a/b/
 $KV get /deep/a/b/c
-$KV list /deep
-
-$KV deltree /deep
+$KV list /deep/

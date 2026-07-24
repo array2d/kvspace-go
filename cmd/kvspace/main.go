@@ -53,7 +53,7 @@ func main() {
 		if err := kv.DelTree(sub[1]); err != nil { fatalf("%v", err) }
 	case "mkindex":
 		if len(sub) < 2 { exitUsage("kvspace mkindex <path>") }
-		if err := kv.Mkindex(ensureDirSuf(sub[1])); err != nil { fatalf("%v", err) }
+		if err := kv.Mkindex(sub[1]); err != nil { fatalf("%v", err) }
 	case "link":
 		if len(sub) < 3 { exitUsage("kvspace link <target> <linkpath>") }
 		if err := kv.Link(sub[1], sub[2]); err != nil { fatalf("%v", err) }
@@ -65,12 +65,12 @@ func main() {
 		if err := kv.ExtIndex(sub[1], sub[2]); err != nil { fatalf("%v", err) }
 	case "list":
 		if len(sub) < 2 { exitUsage("kvspace list <prefix>") }
-		for _, c := range kv.List(ensureDirSuf(sub[1])) { fmt.Println(c) }
+		for _, c := range kv.List(sub[1]) { fmt.Println(c) }
 	case "tree":
 		cmdTree(kv, sub[1:])
 	case "dump":
 		if len(sub) < 2 { exitUsage("kvspace dump <prefix>") }
-		p := ensureDirSuf(sub[1])
+		p := sub[1]
 		kvspace.Walk(kv, p, func(path string, v kvspace.XValue) {
 			short := strings.ReplaceAll(v.String(), "\n", "↵")
 			if len(short) > 80 { short = short[:80] + "…" }
@@ -87,13 +87,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n\n", sub[0])
 		fs.Usage(); os.Exit(1)
 	}
-}
-
-func ensureDirSuf(p string) string {
-	if p == kvspace.PathSep || strings.HasSuffix(p, kvspace.DirIndexSuf) {
-		return p
-	}
-	return p + kvspace.DirIndexSuf
 }
 
 func exitUsage(msg string)    { fmt.Fprintln(os.Stderr, "usage:", msg); os.Exit(1) }
@@ -120,8 +113,10 @@ func cmdTree(kv kvspace.KVSpace, args []string) {
 	}
 	fs.Parse(args)
 	if fs.NArg() == 0 { fs.Usage(); os.Exit(1) }
-	p := ensureDirSuf(fs.Arg(0))
-	fmt.Println(strings.TrimSuffix(p, kvspace.DirIndexSuf))
+	p := fs.Arg(0)
+	root := strings.TrimSuffix(p, kvspace.DirIndexSuf)
+	if root == "" { root = kvspace.PathSep }
+	fmt.Println(root)
 	printTree(kv, p, "", *showExt)
 }
 
@@ -153,6 +148,9 @@ func parseValue(raw string) (kvspace.XValue, error) {
 // ── tree ─────────────────────────────────────────────────────────────────────
 
 func readPrefixExt(kv kvspace.KVSpace, prefix string) string {
+	if prefix == kvspace.PathSep {
+		return ""
+	}
 	clean := strings.TrimSuffix(prefix, kvspace.DirIndexSuf)
 	parent, name := kvspace.SepPath(clean)
 	if parent != kvspace.PathSep { parent += kvspace.DirIndexSuf }

@@ -11,6 +11,8 @@
 
 set -e
 KV="$HOME/.local/bin/kvspace"
+$KV deltree /tgt/
+$KV deltree /base/
 
 echo "=== unlink link ==="
 $KV set /tgt/ index:
@@ -29,6 +31,3 @@ $KV set /merge/b int:3
 $KV unlink /merge
 $KV get /merge
 $KV get /base/a
-
-$KV deltree /tgt
-$KV deltree /base
