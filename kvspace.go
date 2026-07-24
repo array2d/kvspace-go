@@ -57,9 +57,6 @@ type KVSpace interface {
 	DisConn() error
 }
 
-// GetOne 获取单个 key 的值，缺失返回 Null()。
-func GetOne(kv KVSpace, prefix, key string) XValue { return kv.Get(prefix, []string{key})[0] }
-
 // JoinPath 连接父路径与子名，父路径已含尾 / 时不重复插入。
 func JoinPath(parent, child string) string {
 	if parent == PathSep {
