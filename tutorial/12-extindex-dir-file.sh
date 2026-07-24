@@ -2,7 +2,6 @@
 # expected:
 # === tree shows extindex with dir+file ===
 # /ext
-# =/base/
 # ├── d/
 # │   └── y	int64:2
 # ├── d	string:val

@@ -2,7 +2,6 @@
 # expected:
 # === tree showext true ===
 # /ext
-# =/base/
 # ├── z	int64:42
 # ├── x/
 # │   └── z	int64:99
