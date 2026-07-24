@@ -32,6 +32,12 @@ func main() {
 	kv := kvspace.Conn(*dsn)
 	defer kv.DisConn()
 
+	defer func() {
+		if r := recover(); r != nil {
+			fatalf("%v", r)
+		}
+	}()
+
 	switch sub[0] {
 	case "get":
 		if len(sub) < 2 { exitUsage("kvspace get <key1> [key2 ...]") }

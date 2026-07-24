@@ -125,13 +125,14 @@ func (r *redisImpl) resolveOne(ctx context.Context, path string) (string, bool) 
 	return path, false
 }
 
-func (r *redisImpl) extIndex(ctx context.Context, dir string)(values []string, extpath string) {
+func (r *redisImpl) extIndex(ctx context.Context, dir string) (values []string, extpath string) {
 	if !isDir(dir) {
 		panic(kvspace.ErrDirMustEndWithSlash)
 	}
 	data, err := r.rdb.Get(ctx, dir).Bytes()
 	if err != nil {
-		panic(err)
+		if err == goredis.Nil { return nil, "" }
+		panic(fmt.Errorf("%w: extIndex %s err=%v", kvspace.ErrGet, dir, err))
 	}
 	values, extpath = kvspace.DecodeExtIndex(kvspace.DecodeXValue(data))
 	return

@@ -191,7 +191,9 @@ func fprintSlotTable(w io.Writer, kv KVSpace, prefix, indent string, slots []str
 	minS1, maxS1, maxS0 := 0, 0, 0
 	for _, s := range slots {
 		var s0, s1 int
-		fmt.Sscanf(s, "[%d,%d]", &s0, &s1)
+		if n, _ := fmt.Sscanf(s, "[%d,%d]", &s0, &s1); n != 2 {
+			panic("fprintSlotTable: invalid slot name " + s)
+		}
 		v := GetAt(kv, prefix, s)
 		val := "(nil)"
 		if !v.IsNil() { val = v.String() }
