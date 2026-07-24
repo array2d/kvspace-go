@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/array2d/kvspace-go"
@@ -42,7 +41,7 @@ func main() {
 		}
 	case "set":
 		if len(sub) < 3 { exitUsage("kvspace set <key> <value>") }
-		v, err := parseValue(sub[2])
+		v, err := kvspace.ParseValue(sub[2])
 		if err != nil { fatalf("%v", err) }
 		if err := kv.Set([]kvspace.KVPair{{Key: sub[1], Val: v}}); err != nil { fatalf("%v", err) }
 	case "del":
@@ -70,8 +69,7 @@ func main() {
 		cmdTree(kv, sub[1:])
 	case "dump":
 		if len(sub) < 2 { exitUsage("kvspace dump <prefix>") }
-		p := sub[1]
-		kvspace.Walk(kv, p, func(path string, v kvspace.XValue) {
+		kvspace.Walk(kv, sub[1], func(path string, v kvspace.XValue) {
 			short := strings.ReplaceAll(v.String(), "\n", "↵")
 			if len(short) > 80 { short = short[:80] + "…" }
 			fmt.Printf("%-60s %s\n", path, short)
@@ -117,213 +115,5 @@ func cmdTree(kv kvspace.KVSpace, args []string) {
 	root := strings.TrimSuffix(p, kvspace.DirIndexSuf)
 	if root == "" { root = kvspace.PathSep }
 	fmt.Println(root)
-	printTree(kv, p, "", *showExt)
-}
-
-func parseValue(raw string) (kvspace.XValue, error) {
-	idx := strings.Index(raw, ":")
-	if idx < 0 { return kvspace.Str(raw), nil }
-	kind, repr := raw[:idx], raw[idx+1:]
-	switch kind {
-	case "int":
-		i, err := strconv.ParseInt(repr, 10, 64)
-		if err != nil { return kvspace.XValue{}, fmt.Errorf("invalid int: %q", repr) }
-		return kvspace.Int64(i), nil
-	case "float":
-		f, err := strconv.ParseFloat(repr, 64)
-		if err != nil { return kvspace.XValue{}, fmt.Errorf("invalid float: %q", repr) }
-		return kvspace.Float64(f), nil
-	case "bool":
-		switch repr {
-		case "true": return kvspace.Bool(true), nil
-		case "false": return kvspace.Bool(false), nil
-		default: return kvspace.XValue{}, fmt.Errorf("invalid bool: %q", repr)
-		}
-	case "string": return kvspace.Str(repr), nil
-	case "nil": return kvspace.XValue{}, nil
-	default: return kvspace.Raw(kind, []byte(repr)), nil
-	}
-}
-
-// ── tree ─────────────────────────────────────────────────────────────────────
-
-func readPrefixExt(kv kvspace.KVSpace, prefix string) string {
-	if prefix == kvspace.PathSep {
-		return ""
-	}
-	clean := strings.TrimSuffix(prefix, kvspace.DirIndexSuf)
-	parent, name := kvspace.SepPath(clean)
-	if parent != kvspace.PathSep { parent += kvspace.DirIndexSuf }
-	v := kv.Get(parent, []string{name + kvspace.DirIndexSuf})[0]
-	_, extpath := kvspace.DecodeExtIndex(v)
-	return extpath
-}
-
-func listDirExt(kv kvspace.KVSpace, prefix string, children []string) []string {
-	var result []string
-	if ext := readPrefixExt(kv, prefix); ext != "" {
-		result = append(result, kvspace.ExtIndexHead+ext)
-	}
-	for _, c := range children {
-		v := kv.Get(prefix, []string{c + kvspace.DirIndexSuf})[0]
-		if _, ext := kvspace.DecodeExtIndex(v); ext != "" {
-			result = append(result, kvspace.ExtIndexHead+ext)
-		}
-	}
-	return result
-}
-
-func stripExtChildren(kv kvspace.KVSpace, prefix string, children []string) []string {
-	extTarget := readPrefixExt(kv, prefix)
-	if extTarget == "" {
-		return children
-	}
-	extChildren := kv.List(extTarget)
-	return children[:len(children)-len(extChildren)]
-}
-
-func printTree(kv kvspace.KVSpace, prefix, indent string, showExt bool) {
-
-	children := kv.List(prefix)
-	for _, e := range listDirExt(kv, prefix, children) {
-		fmt.Printf("%s%s\n", indent, e)
-	}
-	if !showExt {
-		children = stripExtChildren(kv, prefix, children)
-	}
-	if len(children) > 0 && isSlotTable(children) {
-		printSlotTable(kv, prefix, indent, children)
-		return
-	}
-	slots, nonslots := splitSlots(kv, prefix, children)
-	if len(slots) > 0 {
-		printSlotTable(kv, prefix, indent, slots)
-	}
-
-	type treeItem struct {
-		name        string
-		val         kvspace.XValue
-		childDir    string
-	}
-	var items []treeItem
-	for _, c := range nonslots {
-		v := getAt(kv, prefix, c)
-		childDir := kvspace.JoinPath(prefix, c) + kvspace.DirIndexSuf
-		hasDir := len(kv.List(childDir)) > 0
-		if !hasDir {
-			dirV := getAt(kv, prefix, c+kvspace.DirIndexSuf)
-			hasDir = !dirV.IsNil()
-		}
-		if hasDir {
-			if !v.IsNil() {
-				items = append(items, treeItem{c + kvspace.DirIndexSuf, kvspace.XValue{}, childDir})
-				items = append(items, treeItem{c, v, ""})
-			} else {
-				items = append(items, treeItem{c + kvspace.DirIndexSuf, kvspace.XValue{}, childDir})
-			}
-		} else {
-			items = append(items, treeItem{c, v, ""})
-		}
-	}
-	for i, it := range items {
-		last := i == len(items)-1
-		branch := "├── "
-		if last { branch = "└── " }
-		if !it.val.IsNil() {
-			fmt.Printf("%s%s%s\t%s\n", indent, branch, it.name, it.val)
-		} else {
-			fmt.Printf("%s%s%s\n", indent, branch, it.name)
-		}
-		next := indent + "│   "
-		if last { next = indent + "    " }
-		if it.childDir != "" {
-			printTree(kv, it.childDir, next, showExt)
-		}
-	}
-}
-
-func getAt(kv kvspace.KVSpace, dir, name string) kvspace.XValue {
-	return kv.Get(dir, []string{name})[0]
-}
-
-func isSlotTable(children []string) bool {
-	for _, c := range children {
-		if !strings.HasPrefix(c, "[") || !strings.HasSuffix(c, "]") {
-			return false
-		}
-	}
-	return len(children) > 0
-}
-
-func splitSlots(kv kvspace.KVSpace, prefix string, children []string) (slots, nonslots []string) {
-	for _, c := range children {
-		if strings.HasPrefix(c, "[") && strings.HasSuffix(c, "]") {
-			childDir := kvspace.JoinPath(prefix, c) + kvspace.DirIndexSuf
-			if len(kv.List(childDir)) > 0 {
-				nonslots = append(nonslots, c)
-			} else {
-				slots = append(slots, c)
-			}
-		} else {
-			nonslots = append(nonslots, c)
-		}
-	}
-	return
-}
-
-func printSlotTable(kv kvspace.KVSpace, prefix, indent string, slots []string) {
-	type slot struct{ s0, s1 int; val string }
-	var rows []slot
-	minS1, maxS1, maxS0 := 0, 0, 0
-	for _, s := range slots {
-		var s0, s1 int
-		fmt.Sscanf(s, "[%d,%d]", &s0, &s1)
-		v := getAt(kv, prefix, s)
-		val := "(nil)"
-		if !v.IsNil() {
-			val = v.String()
-		}
-		rows = append(rows, slot{s0, s1, val})
-		if s1 < minS1 {
-			minS1 = s1
-		}
-		if s1 > maxS1 {
-			maxS1 = s1
-		}
-		if s0 > maxS0 {
-			maxS0 = s0
-		}
-	}
-
-	grid := make([][]string, maxS0+1)
-	for i := range grid {
-		row := make([]string, maxS1-minS1+1)
-		for j := range row {
-			row[j] = ""
-		}
-		grid[i] = row
-	}
-	for _, r := range rows {
-		grid[r.s0][r.s1-minS1] = r.val
-	}
-
-	colOrder := make([]int, 0, maxS1-minS1+1)
-	for s1 := -1; s1 >= minS1; s1-- {
-		colOrder = append(colOrder, s1)
-	}
-	for s1 := 0; s1 <= maxS1; s1++ {
-		colOrder = append(colOrder, s1)
-	}
-
-	for s0 := 0; s0 <= maxS0; s0++ {
-		branch := "├── "
-		if s0 == maxS0 {
-			branch = "└── "
-		}
-		fmt.Fprintf(os.Stdout, "%s%s[%d]", indent, branch, s0)
-		for _, s1 := range colOrder {
-			fmt.Fprintf(os.Stdout, "\t%s", grid[s0][s1-minS1])
-		}
-		fmt.Fprintln(os.Stdout)
-	}
+	kvspace.FprintTree(os.Stdout, kv, p, "", *showExt)
 }
