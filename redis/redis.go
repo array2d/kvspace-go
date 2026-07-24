@@ -53,7 +53,7 @@ func isDir(path string) bool { return strings.HasSuffix(path, kvspace.DirIndexSu
 
 func assertDir(path string) {
 	if path != kvspace.PathSep && !isDir(path) {
-		panic(fmt.Sprintf("kvspace: 目录必须以 / 结尾: %s", path))
+		panic(fmt.Errorf("%w: %s", kvspace.ErrDirMustEndWithSlash, path))
 	}
 }
 
@@ -111,7 +111,7 @@ func (r *redisImpl) resolveOne(ctx context.Context, path string) (string, bool) 
 			continue
 		}
 		if err != nil {
-			panic(fmt.Sprintf("kvspace: 路径解析 GET 失败: %s err=%v", cur, err))
+			panic(fmt.Errorf("%w: %s err=%v", kvspace.ErrResolve, cur, err))
 		}
 		v := kvspace.DecodeXValue(data)
 		if v.Kind() == kvspace.KindLinkIndex {
@@ -142,7 +142,7 @@ func (r *redisImpl) ensureParent(ctx context.Context, parent, child string) {
 		return
 	}
 	if !isDir(parent) {
-		panic(fmt.Sprintf("kvspace: 父路径不是目录: %s", parent))
+		panic(fmt.Errorf("%w: %s", kvspace.ErrNotDir, parent))
 	}
 	gp, pn := parentName(parent)
 	nodes := r.readDirIndex(ctx, gp)
@@ -170,7 +170,7 @@ func (r *redisImpl) ensureParent(ctx context.Context, parent, child string) {
 			}
 		}
 	}
-	panic(fmt.Sprintf("kvspace: 父目录不存在: %s", parent))
+	panic(fmt.Errorf("%w: %s", kvspace.ErrParentNotFound, parent))
 }
 
 func (r *redisImpl) collectKeys(ctx context.Context, prefix string) []string {
@@ -182,7 +182,7 @@ func (r *redisImpl) collectKeys(ctx context.Context, prefix string) []string {
 		var err error
 		batch, cursor, err = r.rdb.Scan(ctx, cursor, pattern, 100).Result()
 		if err != nil {
-			panic(fmt.Sprintf("kvspace: SCAN 失败: pattern=%s err=%v", pattern, err))
+			panic(fmt.Errorf("%w: pattern=%s err=%v", kvspace.ErrScan, pattern, err))
 		}
 		keys = append(keys, batch...)
 		if cursor == 0 {

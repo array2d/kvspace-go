@@ -38,7 +38,7 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 			continue
 		}
 		if err != goredis.Nil {
-			panic(fmt.Sprintf("kvspace: Get 失败: key=%s err=%v", full, err))
+			panic(fmt.Errorf("%w: key=%s err=%v", kvspace.ErrGet, full, err))
 		}
 
 		if extT != "" {
@@ -49,7 +49,7 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 				continue
 			}
 			if err != goredis.Nil {
-				panic(fmt.Sprintf("kvspace: Get ext 回退失败: key=%s err=%v", targetKey, err))
+				panic(fmt.Errorf("%w: ext fallback key=%s err=%v", kvspace.ErrGet, targetKey, err))
 			}
 		}
 		results[i] = kvspace.Null()
@@ -60,7 +60,8 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
 	data, err := r.rdb.Get(ctx, dir).Bytes()
 	if err != nil {
-		return kvspace.Null()
+		if err == goredis.Nil { return kvspace.Null() }
+		panic(fmt.Errorf("%w: getDir %s err=%v", kvspace.ErrGet, dir, err))
 	}
 	return kvspace.DecodeXValue(data)
 }
@@ -70,7 +71,8 @@ func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
 func (r *redisImpl) readDirIndex(ctx context.Context, dir string) []string {
 	data, err := r.rdb.Get(ctx, dir).Bytes()
 	if err != nil {
-		return nil
+		if err == goredis.Nil { return nil }
+		panic(fmt.Errorf("%w: readDirIndex %s err=%v", kvspace.ErrGet, dir, err))
 	}
 	v := kvspace.DecodeXValue(data)
 	switch v.Kind() {
@@ -90,8 +92,11 @@ func (r *redisImpl) readDirIndex(ctx context.Context, dir string) []string {
 func (r *redisImpl) addChild(ctx context.Context, pipe goredis.Pipeliner, parent, name string) {
 	data, err := r.rdb.Get(ctx, parent).Bytes()
 	if err != nil {
-		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewIndexValue([]string{name})), 0)
-		return
+		if err == goredis.Nil {
+			pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewIndexValue([]string{name})), 0)
+			return
+		}
+		panic(fmt.Errorf("%w: addChild %s err=%v", kvspace.ErrGet, parent, err))
 	}
 	v := kvspace.DecodeXValue(data)
 	switch v.Kind() {
@@ -143,7 +148,7 @@ func (r *redisImpl) removeChild(ctx context.Context, pipe goredis.Pipeliner, par
 func (r *redisImpl) Mkindex(path string) error {
 	ctx := bg
 	if !isDir(path) {
-		return fmt.Errorf("kvspace: Mkindex 路径必须以 / 结尾: %s", path)
+		return fmt.Errorf("%w: Mkindex %s", kvspace.ErrDirMustEndWithSlash, path)
 	}
 	resolved := r.resolvePath(ctx, path)
 
@@ -159,7 +164,7 @@ func (r *redisImpl) Mkindex(path string) error {
 		pipe := r.rdb.Pipeline()
 		r.addChild(ctx, pipe, parent, name)
 		if _, err := pipe.Exec(ctx); err != nil {
-			return fmt.Errorf("kvspace: Mkindex 失败: %s err=%v", cur, err)
+			return fmt.Errorf("%w: Mkindex %s err=%v", kvspace.ErrPipeExec, cur, err)
 		}
 	}
 	return nil
@@ -206,7 +211,7 @@ func (r *redisImpl) setFile(ctx context.Context, pipe goredis.Pipeliner, path st
 			extNodes := r.readDirIndex(ctx, extT)
 			for _, n := range extNodes {
 				if n == name {
-					panic(fmt.Sprintf("kvspace: 禁止对 extindex 只读路径执行写操作: %s", path))
+					panic(fmt.Errorf("%w: %s", kvspace.ErrExtWrite, path))
 				}
 			}
 		}
@@ -288,7 +293,7 @@ func (r *redisImpl) Del(keys ...string) error {
 				extNodes := r.readDirIndex(ctx, extT)
 				for _, n := range extNodes {
 					if n == name {
-						panic(fmt.Sprintf("kvspace: 禁止删除 extindex 只读路径: %s", resolved))
+						panic(fmt.Errorf("%w: %s", kvspace.ErrExtDel, resolved))
 					}
 				}
 			}
@@ -368,7 +373,7 @@ func (r *redisImpl) Link(target, linkpath string) error {
 	ctx := bg
 
 	if isDir(target) != isDir(linkpath) {
-		return fmt.Errorf("kvspace: Link target 和 linkpath 类型不一致: %s → %s", target, linkpath)
+		return fmt.Errorf("%w: %s → %s", kvspace.ErrLinkTypeMismatch, target, linkpath)
 	}
 
 	resolved := r.resolveParent(ctx, linkpath)
@@ -393,12 +398,12 @@ func (r *redisImpl) Link(target, linkpath string) error {
 func (r *redisImpl) ExtIndex(path, extpath string) error {
 	ctx := bg
 	if !isDir(path) || !isDir(extpath) {
-		return fmt.Errorf("kvspace: ExtIndex path 和 extpath 必须以 / 结尾: %s, %s", path, extpath)
+		return fmt.Errorf("%w: ExtIndex path=%s extpath=%s", kvspace.ErrDirMustEndWithSlash, path, extpath)
 	}
 
 	if data, err := r.rdb.Get(ctx, extpath).Bytes(); err == nil {
 		if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
-			return fmt.Errorf("kvspace: ExtIndex 不容许级联: %s 已是 extindex", extpath)
+			return fmt.Errorf("%w: %s", kvspace.ErrExtCascade, extpath)
 		}
 	}
 

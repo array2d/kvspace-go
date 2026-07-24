@@ -12,6 +12,16 @@ const (
 
 var (
 	ErrDirMustEndWithSlash = errors.New("kvspace: index must end with /")
+	ErrGet                 = errors.New("kvspace: GET")
+	ErrPipeExec            = errors.New("kvspace: pipeline exec")
+	ErrResolve             = errors.New("kvspace: 路径解析 GET")
+	ErrScan                = errors.New("kvspace: SCAN")
+	ErrExtWrite            = errors.New("kvspace: 禁止对 extindex 只读路径执行写操作")
+	ErrExtDel              = errors.New("kvspace: 禁止删除 extindex 只读路径")
+	ErrNotDir              = errors.New("kvspace: 父路径不是目录")
+	ErrParentNotFound      = errors.New("kvspace: 父目录不存在")
+	ErrExtCascade          = errors.New("kvspace: ExtIndex 不容许级联")
+	ErrLinkTypeMismatch    = errors.New("kvspace: Link target 和 linkpath 类型不一致")
 )
 // ── XValue kind ──────────────────────────────────────────────────────────────
 
