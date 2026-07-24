@@ -16,7 +16,12 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 	ctx := bg
 	assertDir(prefix)
 	prefix = r.resolvePath(ctx, prefix)
-	extT := r.extTarget(ctx, prefix)
+	var extT string
+	if data, err := r.rdb.Get(ctx, prefix).Bytes(); err == nil {
+		if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
+			_, extT = kvspace.DecodeExtIndex(v)
+		}
+	}
 
 	results := make([]kvspace.XValue, len(keys))
 	for i, k := range keys {
@@ -53,29 +58,84 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 }
 
 func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
-	members, err := r.rdb.SMembers(ctx, dir).Result()
-	if err == goredis.Nil || len(members) == 0 {
+	data, err := r.rdb.Get(ctx, dir).Bytes()
+	if err != nil {
 		return kvspace.Null()
 	}
+	return kvspace.DecodeXValue(data)
+}
+
+// ── 目录 index 读写 ────────────────────────────────────────────────────────────
+
+func (r *redisImpl) readDirIndex(ctx context.Context, dir string) []string {
+	data, err := r.rdb.Get(ctx, dir).Bytes()
 	if err != nil {
-		panic(fmt.Sprintf("kvspace: getDir SMEMBERS 失败: %s err=%v", dir, err))
+		return nil
 	}
-
-	var extT string
-	var nodes []string
-	for _, m := range members {
-		if t := kvspace.DecodeExtEntry(m); t != "" {
-			extT = t
-		} else if !strings.HasPrefix(m, kvspace.ReservedPrefix) {
-			nodes = append(nodes, m)
+	v := kvspace.DecodeXValue(data)
+	switch v.Kind() {
+	case kvspace.KindIndex:
+		nodes := kvspace.DecodeIndex(v)
+		if len(nodes) == 1 && nodes[0] == "" {
+			return nil
 		}
+		return nodes
+	case kvspace.KindExtIndex:
+		childs, _ := kvspace.DecodeExtIndex(v)
+		return childs
 	}
+	return nil
+}
 
-	if extT != "" {
-		raw := []byte(extT)
-		return kvspace.Raw(kvspace.KindExtIndex, raw)
+func (r *redisImpl) addChild(ctx context.Context, pipe goredis.Pipeliner, parent, name string) {
+	data, err := r.rdb.Get(ctx, parent).Bytes()
+	if err != nil {
+		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewIndexValue([]string{name})), 0)
+		return
 	}
-	return kvspace.Raw(kvspace.KindIndex, []byte(strings.Join(nodes, kvspace.PathSep)))
+	v := kvspace.DecodeXValue(data)
+	switch v.Kind() {
+	case kvspace.KindIndex:
+		nodes := kvspace.DecodeIndex(v)
+		if len(nodes) == 1 && nodes[0] == "" { nodes = nil }
+		for _, n := range nodes {
+			if n == name { return }
+		}
+		nodes = append(nodes, name)
+		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewIndexValue(nodes)), 0)
+	case kvspace.KindExtIndex:
+		childs, extpath := kvspace.DecodeExtIndex(v)
+		for _, c := range childs {
+			if c == name { return }
+		}
+		childs = append(childs, name)
+		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewExtIndexValue(childs, extpath)), 0)
+	}
+}
+
+func (r *redisImpl) removeChild(ctx context.Context, pipe goredis.Pipeliner, parent, name string) {
+	data, err := r.rdb.Get(ctx, parent).Bytes()
+	if err != nil {
+		return
+	}
+	v := kvspace.DecodeXValue(data)
+	switch v.Kind() {
+	case kvspace.KindIndex:
+		nodes := kvspace.DecodeIndex(v)
+		if len(nodes) == 1 && nodes[0] == "" { nodes = nil }
+		filtered := make([]string, 0, len(nodes))
+		for _, n := range nodes {
+			if n != name { filtered = append(filtered, n) }
+		}
+		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewIndexValue(filtered)), 0)
+	case kvspace.KindExtIndex:
+		childs, extpath := kvspace.DecodeExtIndex(v)
+		filtered := make([]string, 0, len(childs))
+		for _, c := range childs {
+			if c != name { filtered = append(filtered, c) }
+		}
+		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewExtIndexValue(filtered, extpath)), 0)
+	}
 }
 
 // ── Mkindex ───────────────────────────────────────────────────────────────────
@@ -91,17 +151,15 @@ func (r *redisImpl) Mkindex(path string) error {
 	cur := kvspace.PathSep
 	for _, p := range parts {
 		cur = kvspace.JoinPath(cur, p) + kvspace.DirIndexSuf
-		exists, err := r.rdb.Exists(ctx, cur).Result()
-		if err != nil {
-			return fmt.Errorf("kvspace: Mkindex EXISTS 失败: %s err=%v", cur, err)
-		}
-		if exists > 0 {
+		if r.readDirIndex(ctx, cur) != nil {
 			continue
 		}
 		parent, name := parentName(cur)
 		r.ensureParent(ctx, parent, name)
-		if err := r.rdb.SAdd(ctx, parent, name).Err(); err != nil {
-			return fmt.Errorf("kvspace: Mkindex SADD 失败: %s err=%v", cur, err)
+		pipe := r.rdb.Pipeline()
+		r.addChild(ctx, pipe, parent, name)
+		if _, err := pipe.Exec(ctx); err != nil {
+			return fmt.Errorf("kvspace: Mkindex 失败: %s err=%v", cur, err)
 		}
 	}
 	return nil
@@ -132,40 +190,38 @@ func (r *redisImpl) setFile(ctx context.Context, pipe goredis.Pipeliner, path st
 	parent, name := parentName(path)
 	r.ensureParent(ctx, parent, name)
 
-	if extT := r.extTarget(ctx, parent); extT != "" {
-		localExists, _ := r.rdb.SIsMember(ctx, parent, name).Result()
+	var extT string
+	if data, err := r.rdb.Get(ctx, parent).Bytes(); err == nil {
+		if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
+			_, extT = kvspace.DecodeExtIndex(v)
+		}
+	}
+	if extT != "" {
+		localNodes := r.readDirIndex(ctx, parent)
+		localExists := false
+		for _, n := range localNodes {
+			if n == name { localExists = true; break }
+		}
 		if !localExists {
-			targetExists, _ := r.rdb.SIsMember(ctx, extT, name).Result()
-			if targetExists {
-				panic(fmt.Sprintf("kvspace: 禁止对 extindex 只读路径执行写操作: %s", path))
+			extNodes := r.readDirIndex(ctx, extT)
+			for _, n := range extNodes {
+				if n == name {
+					panic(fmt.Sprintf("kvspace: 禁止对 extindex 只读路径执行写操作: %s", path))
+				}
 			}
 		}
 	}
 
 	pipe.Set(ctx, path, kvspace.EncodeXValue(val), 0)
-	pipe.SAdd(ctx, parent, name)
+	r.addChild(ctx, pipe, parent, name)
 }
 
 func (r *redisImpl) setDir(ctx context.Context, pipe goredis.Pipeliner, path string, val kvspace.XValue) {
 	parent, name := parentName(path)
 	r.ensureParent(ctx, parent, name)
 
-	pipe.Del(ctx, path)
-	switch val.Kind() {
-	case kvspace.KindIndex:
-		if len(val.RawBytes()) > 0 {
-			for _, n := range strings.Split(string(val.RawBytes()), kvspace.PathSep) {
-				if n != "" {
-					pipe.SAdd(ctx, path, n)
-				}
-			}
-		}
-	case kvspace.KindExtIndex:
-		if extpath := kvspace.DecodeExtIndex(val); extpath != "" {
-			pipe.SAdd(ctx, path, kvspace.EncodeExtEntry(extpath))
-		}
-	}
-	pipe.SAdd(ctx, parent, name)
+	pipe.Set(ctx, path, kvspace.EncodeXValue(val), 0)
+	r.addChild(ctx, pipe, parent, name)
 }
 
 // ── List ──────────────────────────────────────────────────────────────────────
@@ -178,31 +234,27 @@ func (r *redisImpl) List(prefix string) []string {
 		return nil
 	}
 
-	members, err := r.rdb.SMembers(ctx, resolved).Result()
-	if err != nil {
-		panic(fmt.Sprintf("kvspace: List SMEMBERS 失败: prefix=%s err=%v", resolved, err))
-	}
+	members := r.readDirIndex(ctx, resolved)
 
-	extT := r.extTarget(ctx, resolved)
+	var extT string
+	if data, err := r.rdb.Get(ctx, resolved).Bytes(); err == nil {
+		if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
+			_, extT = kvspace.DecodeExtIndex(v)
+		}
+	}
 	var extMembers []string
 	if extT != "" {
-		extMembers, err = r.rdb.SMembers(ctx, extT).Result()
-		if err != nil {
-			panic(fmt.Sprintf("kvspace: List SMEMBERS ext 失败: ext=%s err=%v", extT, err))
-		}
+		extMembers = r.readDirIndex(ctx, extT)
 	}
 
 	localSet := make(map[string]bool, len(members))
 	var result []string
 	for _, m := range members {
-		if strings.HasPrefix(m, kvspace.ReservedPrefix) || kvspace.DecodeExtEntry(m) != "" {
-			continue
-		}
 		localSet[m] = true
 		result = append(result, m)
 	}
 	for _, m := range extMembers {
-		if strings.HasPrefix(m, kvspace.ReservedPrefix) || kvspace.DecodeExtEntry(m) != "" || localSet[m] {
+		if localSet[m] {
 			continue
 		}
 		result = append(result, m)
@@ -220,33 +272,36 @@ func (r *redisImpl) Del(keys ...string) error {
 		resolved := r.resolveParent(ctx, key)
 		parent, name := parentName(resolved)
 
-		if isDir(resolved) {
-			if extT := r.extTarget(ctx, parent); extT != "" {
-				localExists, _ := r.rdb.SIsMember(ctx, parent, name).Result()
-				if !localExists {
-					targetExists, _ := r.rdb.SIsMember(ctx, extT, name).Result()
-					if targetExists {
+		var extT string
+		if data, err := r.rdb.Get(ctx, parent).Bytes(); err == nil {
+			if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
+				_, extT = kvspace.DecodeExtIndex(v)
+			}
+		}
+		if extT != "" {
+			localNodes := r.readDirIndex(ctx, parent)
+			localExists := false
+			for _, n := range localNodes {
+				if n == name { localExists = true; break }
+			}
+			if !localExists {
+				extNodes := r.readDirIndex(ctx, extT)
+				for _, n := range extNodes {
+					if n == name {
 						panic(fmt.Sprintf("kvspace: 禁止删除 extindex 只读路径: %s", resolved))
 					}
 				}
 			}
+		}
+
+		if isDir(resolved) {
 			linkKey := resolved[:len(resolved)-len(kvspace.DirIndexSuf)]
 			pipe.Del(ctx, linkKey)
 			pipe.Del(ctx, resolved)
-			pipe.SRem(ctx, parent, name)
 		} else {
-			if extT := r.extTarget(ctx, parent); extT != "" {
-				localExists, _ := r.rdb.SIsMember(ctx, parent, name).Result()
-				if !localExists {
-					targetExists, _ := r.rdb.SIsMember(ctx, extT, name).Result()
-					if targetExists {
-						panic(fmt.Sprintf("kvspace: 禁止删除 extindex 只读路径: %s", resolved))
-					}
-				}
-			}
 			pipe.Del(ctx, resolved)
-			pipe.SRem(ctx, parent, name)
 		}
+		r.removeChild(ctx, pipe, parent, name)
 	}
 
 	_, err := pipe.Exec(ctx)
@@ -272,11 +327,9 @@ func (r *redisImpl) DelTree(prefix string) error {
 
 	resolved := r.resolvePath(ctx, prefix)
 	keys := r.collectKeys(ctx, resolved)
-	if len(keys) == 0 {
-		return nil
-	}
 
 	pipe := r.rdb.Pipeline()
+	pipe.Del(ctx, resolved)
 	for _, k := range keys {
 		pipe.Del(ctx, k)
 	}
@@ -285,7 +338,10 @@ func (r *redisImpl) DelTree(prefix string) error {
 	}
 
 	parent, name := parentName(resolved)
-	return r.rdb.SRem(ctx, parent, name).Err()
+	pipe = r.rdb.Pipeline()
+	r.removeChild(ctx, pipe, parent, name)
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 // ── Notify / Watch ────────────────────────────────────────────────────────────
@@ -327,7 +383,7 @@ func (r *redisImpl) Link(target, linkpath string) error {
 
 	pipe := r.rdb.Pipeline()
 	pipe.Set(ctx, storeKey, kvspace.EncodeXValue(kvspace.NewLinkValue(target)), 0)
-	pipe.SAdd(ctx, parent, name)
+	r.addChild(ctx, pipe, parent, name)
 	_, err := pipe.Exec(ctx)
 	return err
 }
@@ -340,8 +396,10 @@ func (r *redisImpl) ExtIndex(path, extpath string) error {
 		return fmt.Errorf("kvspace: ExtIndex path 和 extpath 必须以 / 结尾: %s, %s", path, extpath)
 	}
 
-	if t := r.extTarget(ctx, extpath); t != "" {
-		return fmt.Errorf("kvspace: ExtIndex 不容许级联: %s 已是 extindex", extpath)
+	if data, err := r.rdb.Get(ctx, extpath).Bytes(); err == nil {
+		if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
+			return fmt.Errorf("kvspace: ExtIndex 不容许级联: %s 已是 extindex", extpath)
+		}
 	}
 
 	resolved := r.resolveParent(ctx, path)
@@ -349,8 +407,9 @@ func (r *redisImpl) ExtIndex(path, extpath string) error {
 	r.ensureParent(ctx, parent, name)
 
 	pipe := r.rdb.Pipeline()
-	pipe.SAdd(ctx, resolved, kvspace.EncodeExtEntry(extpath))
-	pipe.SAdd(ctx, parent, name)
+	val := kvspace.NewExtIndexValue(nil, extpath)
+	pipe.Set(ctx, resolved, kvspace.EncodeXValue(val), 0)
+	r.addChild(ctx, pipe, parent, name)
 	_, err := pipe.Exec(ctx)
 	return err
 }
@@ -371,32 +430,17 @@ func (r *redisImpl) UnLink(path string) error {
 		if v.Kind() == kvspace.KindLinkIndex {
 			pipe := r.rdb.Pipeline()
 			pipe.Del(ctx, linkKey)
-			parent, name := parentName(path)
-			pipe.SRem(ctx, parent, name)
+			parent, name := parentName(resolved)
+			r.removeChild(ctx, pipe, parent, name)
 			_, err = pipe.Exec(ctx)
 			return err
 		}
 	}
 
-	if isDir(resolved) {
-		members, err := r.rdb.SMembers(ctx, resolved).Result()
-		if err != nil {
-			return err
-		}
-		pipe := r.rdb.Pipeline()
-		for _, m := range members {
-			if kvspace.DecodeExtEntry(m) != "" || strings.HasPrefix(m, kvspace.ReservedPrefix) {
-				pipe.SRem(ctx, resolved, m)
-			}
-		}
-		_, err = pipe.Exec(ctx)
-		return err
-	}
-
 	pipe := r.rdb.Pipeline()
 	pipe.Del(ctx, resolved)
 	parent, name := parentName(resolved)
-	pipe.SRem(ctx, parent, name)
+	r.removeChild(ctx, pipe, parent, name)
 	_, err = pipe.Exec(ctx)
 	return err
 }

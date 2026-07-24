@@ -2,7 +2,7 @@
 
 ## 第零部分:我的原则
 
-绝对上帝设计美学：代码必须按我定义的清晰优雅的方式运行，非我的定义，直接error/panic，不容许控制流包庇错误。
+绝对上帝设计美学：代码必须按我定义的清晰优雅的方式运行，非我的定义，直接error/panic，绝不容许控制流包庇错误。
 绝不容许代码以奇怪的方式成功运行，就像用四个乳头走路的牛，必须立即杀死这样的牛。
 写代码要像疯子一样洁癖偏执，让代码走唯一的正确方向，其它方向直接error/panic，就像大树只容许主干向上生长，要砍掉所有分支，这些分支都是累赘！是bug的温床！。
 
@@ -11,19 +11,19 @@
 ### 1. 核心概念
 
 + 值key：也叫文件，普通key
-+ 索引key：也叫目录，index，包括extindex。其xvalue内存储着下级目录成员列表，redis用set实现，其它impl是数组实现。
++ 索引key：也叫目录，index，包括extindex。其xvalue bytes内存储着下级目录成员列表，用换行符(\\n)拼接成员路径，以 Redis string SET 命令存储。不再使用 Redis Set 数据结构。
 
 KVSpace 是文件系统风格的 KV 存储抽象，当前是Rediscli实现。
 
 路径 `/a/b` 的值存为 Redis key `/a/b`。
 
-目录（index，包括extindex），必须以/结尾 `/a/` 存为 Redis Set，成员是 `/a` 下的直接子名。
+目录（index，包括extindex），必须以/结尾 `/a/` 存为 Redis string key，value 是 XValue bytes。
 
 link可以是目录和文件key
 
-/a 是 string key，/a/ 是 Set，独立共存
+/a 是 string key（文件值），/a/ 是 string key（目录索引），独立共存
 
-`/` 是根目录，`/` 的 Set 存顶级条目名。
+`/` 是根目录，`/` 的 string key 存顶级条目名。
 
 ### 2. XValue 类型系统
 
@@ -35,11 +35,11 @@ TLV 编码格式。实际是 [1B kind_len][N B kind_name][4B arraylength LE][4B 
 
 普通xvalue结构定义简单，请直接看代码
 
-index类型的kind，value=string数组,redis-impl都用set直接实现
+index类型的kind，value=换行符拼接的成员名字符串
 
 KindIndex     = "index"，
 KindLinkIndex = "linkindex" // 纯链接，写穿透到目标
-KindExtIndex  = "extindex"  // 
+KindExtIndex  = "extindex"  // 扩展索引，bytes首行为=extpath，后续行为自身成员
 
 ### 3. Link / ExtIndex
 
@@ -48,16 +48,19 @@ kind=KindLinkIndex,xvalue=存string即可"targetpath"，link来说，target和li
 
 
 ExtIndex(path, extpath)，ExtIndex可以理解为写时复制的叠加层
+    一句话代码正确理解ExtIndex：list(extindexpath)=append(extindex.value[1:],list(extindex.exttarget))
     只能是目录,如extindex="/a/a2/",exttargetindex="/lib/funca/"，下级key(如如 "/a/a2/be")的读写访问，均跳转/lib/funca/be
 ExtIndex是index，exttargetindex也是index，key必须都以/结尾
 key不容许在2者重复！（extIndex自身存在的key，不容许出现在exttargetindex中）所以读操作覆盖二者，下级成员的写/创建/删除操作都只更新extIndex自身
 逻辑上，我们通常不对extIndex/下的只读路径（也就是exttargetindex内的成员）执行任何写操作，一旦操作，需要直接panic，警告开发者，强制修改
-kind=KindExtIndex,xvalue存字符串数组的bytes["=exttargetindex_path"，"node1","node2","node3","node4",]，对redis-impl直接用set
-只容许有1个exttargetindex,数组实现下exttargetindex_path必须是首个。
+kind=KindExtIndex,xvalue bytes格式：首行为 "=exttargetindex_path"，后续行为自身成员名，换行符分隔。例：`=/lib/funca/\nnode1\nnode2`
+只容许有1个exttargetindex, exttargetindex_path必须是首个。
 extindex 不容许级联,exttargetindex必须是普通index
 exttargetindex前缀符号=定义在const文件！
 
 ExtIndex是kvlang的函数调用开辟新栈的需求，中间变量需要写入ExtIndex，而指令则直接来自/lib/funca/下，而/lib是代码库函数
+
+
 
 ### 4.kvspace
 kvspace是一个完全分布式的元数据存储，禁止kvspace client本地存储任何信息。

@@ -4,8 +4,6 @@ package redis
 import (
 	"context"
 	"fmt"
-	"log"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -41,57 +39,6 @@ func ConnPool(dsn string) kvspace.KVSpace {
 		rdb.AddHook(&logHook{})
 	}
 	return &redisImpl{rdb: rdb}
-}
-
-// ── 日志 Hook ─────────────────────────────────────────────────────────────────
-
-type logHook struct{}
-
-func (h *logHook) DialHook(next goredis.DialHook) goredis.DialHook {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return next(ctx, network, addr)
-	}
-}
-
-func (h *logHook) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook {
-	return func(ctx context.Context, cmd goredis.Cmder) error {
-		t0 := time.Now()
-		err := next(ctx, cmd)
-		if redisLogLv >= 2 {
-			log.Printf("[redis] %s → %v", cmd.String(), time.Since(t0).Round(time.Microsecond))
-		} else {
-			log.Printf("[redis] %s", cmdName(cmd))
-		}
-		return err
-	}
-}
-
-func (h *logHook) ProcessPipelineHook(next goredis.ProcessPipelineHook) goredis.ProcessPipelineHook {
-	return func(ctx context.Context, cmds []goredis.Cmder) error {
-		t0 := time.Now()
-		err := next(ctx, cmds)
-		var sb strings.Builder
-		for i, c := range cmds {
-			if i > 0 {
-				sb.WriteString("; ")
-			}
-			sb.WriteString(cmdName(c))
-		}
-		if redisLogLv >= 2 {
-			log.Printf("[redis] pipeline(%d) [%s] → %v", len(cmds), sb.String(), time.Since(t0).Round(time.Microsecond))
-		} else {
-			log.Printf("[redis] pipeline(%d) [%s]", len(cmds), sb.String())
-		}
-		return err
-	}
-}
-
-func cmdName(c goredis.Cmder) string {
-	s := c.String()
-	if i := strings.IndexByte(s, ' '); i >= 0 {
-		return s[:i]
-	}
-	return s
 }
 
 // ── 实现体 ────────────────────────────────────────────────────────────────────
@@ -178,23 +125,16 @@ func (r *redisImpl) resolveOne(ctx context.Context, path string) (string, bool) 
 	return path, false
 }
 
-func (r *redisImpl) extTarget(ctx context.Context, dir string) string {
+func (r *redisImpl) extIndex(ctx context.Context, dir string)(values []string, extpath string) {
 	if !isDir(dir) {
-		return ""
+		panic(kvspace.ErrDirMustEndWithSlash)
 	}
-	members, err := r.rdb.SMembers(ctx, dir).Result()
-	if err == goredis.Nil {
-		return ""
-	}
+	data, err := r.rdb.Get(ctx, dir).Bytes()
 	if err != nil {
-		panic(fmt.Sprintf("kvspace: extTarget SMEMBERS 失败: %s err=%v", dir, err))
+		panic(err)
 	}
-	for _, m := range members {
-		if t := kvspace.DecodeExtEntry(m); t != "" {
-			return t
-		}
-	}
-	return ""
+	values, extpath = kvspace.DecodeExtIndex(kvspace.DecodeXValue(data))
+	return
 }
 
 func (r *redisImpl) ensureParent(ctx context.Context, parent, child string) {
@@ -202,33 +142,35 @@ func (r *redisImpl) ensureParent(ctx context.Context, parent, child string) {
 		return
 	}
 	if !isDir(parent) {
-		panic(fmt.Sprintf("kvspace: 父路径不是目录: %s（Set %s）", parent, child))
+		panic(fmt.Sprintf("kvspace: 父路径不是目录: %s", parent))
 	}
 	gp, pn := parentName(parent)
-	exists, err := r.rdb.SIsMember(ctx, gp, pn).Result()
-	if err != nil {
-		panic(fmt.Sprintf("kvspace: 父目录检查失败: %s err=%v", parent, err))
-	}
-	if exists {
-		return
-	}
-
-	// 检查 exttarget：父目录可能在 extIndex 的只读层
-	extT := r.extTarget(ctx, gp)
-	if extT != "" {
-		extExists, err := r.rdb.SIsMember(ctx, extT, pn).Result()
-		if err != nil {
-			panic(fmt.Sprintf("kvspace: 父目录 ext 检查失败: %s err=%v", parent, err))
-		}
-		if extExists {
-			// 在 extIndex 本地层创建影子目录，后续写操作落在本地
-			if err := r.rdb.SAdd(ctx, gp, pn).Err(); err != nil {
-				panic(fmt.Sprintf("kvspace: 父目录影子创建失败: %s err=%v", parent, err))
-			}
+	nodes := r.readDirIndex(ctx, gp)
+	for _, n := range nodes {
+		if n == pn {
 			return
 		}
 	}
-	panic(fmt.Sprintf("kvspace: 父目录不存在: %s（Set %s）", parent, child))
+
+	// 检查 exttarget：父目录可能在 extIndex 的只读层
+	var extT string
+	if data, err := r.rdb.Get(ctx, gp).Bytes(); err == nil {
+		if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
+			_, extT = kvspace.DecodeExtIndex(v)
+		}
+	}
+	if extT != "" {
+		extNodes := r.readDirIndex(ctx, extT)
+		for _, n := range extNodes {
+			if n == pn {
+				// 在 extIndex 本地层创建影子目录
+				nodes = append(nodes, pn)
+				r.rdb.Set(ctx, gp, kvspace.EncodeXValue(kvspace.NewIndexValue(nodes)), 0)
+				return
+			}
+		}
+	}
+	panic(fmt.Sprintf("kvspace: 父目录不存在: %s", parent))
 }
 
 func (r *redisImpl) collectKeys(ctx context.Context, prefix string) []string {

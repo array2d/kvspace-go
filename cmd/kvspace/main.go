@@ -37,13 +37,7 @@ func main() {
 	case "get":
 		if len(sub) < 2 { exitUsage("kvspace get <key1> [key2 ...]") }
 		for _, k := range sub[1:] {
-			pfx, lst := kvspace.SepPath(k)
-			if pfx == "" {
-				pfx = kvspace.PathSep
-			} else if pfx != kvspace.PathSep {
-				pfx += kvspace.DirIndexSuf
-			}
-			v := kvspace.GetOne(kv, pfx, lst)
+			v := kvspace.GetOne(kv, k)
 			if v.IsNil() { fmt.Printf("%s\t(nil)\n", k) } else { fmt.Printf("%s\t%s\n", k, v) }
 		}
 	case "set":
@@ -73,10 +67,7 @@ func main() {
 		if len(sub) < 2 { exitUsage("kvspace list <prefix>") }
 		for _, c := range kv.List(ensureDirSuf(sub[1])) { fmt.Println(c) }
 	case "tree":
-		if len(sub) < 2 { exitUsage("kvspace tree <prefix>") }
-		p := ensureDirSuf(sub[1])
-		fmt.Println(strings.TrimSuffix(p, kvspace.DirIndexSuf))
-		printTree(kv, p, "")
+		cmdTree(kv, sub[1:])
 	case "dump":
 		if len(sub) < 2 { exitUsage("kvspace dump <prefix>") }
 		p := ensureDirSuf(sub[1])
@@ -120,6 +111,20 @@ func cmdWatch(kv kvspace.KVSpace, args []string) {
 	fmt.Println(kv.Watch(fs.Arg(0), *timeout))
 }
 
+func cmdTree(kv kvspace.KVSpace, args []string) {
+	fs := flag.NewFlagSet("tree", flag.ExitOnError)
+	showExt := fs.Bool("showext", true, "expand extindex entries (=target/)")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: kvspace tree [--showext] <prefix>")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() == 0 { fs.Usage(); os.Exit(1) }
+	p := ensureDirSuf(fs.Arg(0))
+	fmt.Println(strings.TrimSuffix(p, kvspace.DirIndexSuf))
+	printTree(kv, p, "", *showExt)
+}
+
 func parseValue(raw string) (kvspace.XValue, error) {
 	idx := strings.Index(raw, ":")
 	if idx < 0 { return kvspace.Str(raw), nil }
@@ -147,8 +152,47 @@ func parseValue(raw string) (kvspace.XValue, error) {
 
 // ── tree ─────────────────────────────────────────────────────────────────────
 
-func printTree(kv kvspace.KVSpace, prefix, indent string) {
+func readPrefixExt(kv kvspace.KVSpace, prefix string) string {
+	clean := strings.TrimSuffix(prefix, kvspace.DirIndexSuf)
+	parent, name := kvspace.SepPath(clean)
+	if parent != kvspace.PathSep { parent += kvspace.DirIndexSuf }
+	v := kv.Get(parent, []string{name + kvspace.DirIndexSuf})[0]
+	_, extpath := kvspace.DecodeExtIndex(v)
+	return extpath
+}
+
+func listDirExt(kv kvspace.KVSpace, prefix string, children []string) []string {
+	var result []string
+	if ext := readPrefixExt(kv, prefix); ext != "" {
+		result = append(result, kvspace.ExtIndexHead+ext)
+	}
+	for _, c := range children {
+		v := kv.Get(prefix, []string{c + kvspace.DirIndexSuf})[0]
+		if _, ext := kvspace.DecodeExtIndex(v); ext != "" {
+			result = append(result, kvspace.ExtIndexHead+ext)
+		}
+	}
+	return result
+}
+
+func stripExtChildren(kv kvspace.KVSpace, prefix string, children []string) []string {
+	extTarget := readPrefixExt(kv, prefix)
+	if extTarget == "" {
+		return children
+	}
+	extChildren := kv.List(extTarget)
+	return children[:len(children)-len(extChildren)]
+}
+
+func printTree(kv kvspace.KVSpace, prefix, indent string, showExt bool) {
+
 	children := kv.List(prefix)
+	for _, e := range listDirExt(kv, prefix, children) {
+		fmt.Printf("%s%s\n", indent, e)
+	}
+	if !showExt {
+		children = stripExtChildren(kv, prefix, children)
+	}
 	if len(children) > 0 && isSlotTable(children) {
 		printSlotTable(kv, prefix, indent, children)
 		return
@@ -173,7 +217,7 @@ func printTree(kv kvspace.KVSpace, prefix, indent string) {
 		if last {
 			next = indent + "    "
 		}
-		printTree(kv, kvspace.JoinPath(prefix, c)+kvspace.DirIndexSuf, next)
+		printTree(kv, kvspace.JoinPath(prefix, c)+kvspace.DirIndexSuf, next, showExt)
 	}
 }
 
