@@ -124,6 +124,66 @@ func SplitSlots(kv KVSpace, prefix string, children []string) (slots, nonslots [
 	return
 }
 
+// ── 2D slot collapse ──────────────────────────────────────────────────────
+
+// collapse2D 将 [s0,s1] 按 s0 聚合为 [s0]，返回新 children 和合成值。
+// kvlang 指令序列：[s0,0]=opcode, [s0,s1<0]=读参(左), [s0,s1>0]=写参(右) → 汇编式行。
+func collapse2D(kv KVSpace, prefix string, children []string) ([]string, map[string]string) {
+	type key struct{ s0, s1 int }
+	is2D := map[key]bool{}
+	for _, c := range children {
+		var s0, s1 int
+		if n, _ := fmt.Sscanf(c, "[%d,%d]", &s0, &s1); n == 2 {
+			// 只聚合叶子 [s0,s1]：有 childs 的目录保留原样
+			if len(kv.List(JoinPath(prefix, c)+DirIndexSuf)) == 0 {
+				is2D[key{s0, s1}] = true
+			}
+		}
+	}
+	if len(is2D) == 0 {
+		return children, nil
+	}
+
+	s0set, minS1, maxS1 := map[int]bool{}, 0, 0
+	first := true
+	for k := range is2D {
+		s0set[k.s0] = true
+		if first {
+			minS1, maxS1, first = k.s1, k.s1, false
+		} else {
+			if k.s1 < minS1 { minS1 = k.s1 }
+			if k.s1 > maxS1 { maxS1 = k.s1 }
+		}
+	}
+
+	aggVals := map[string]string{}
+	for s0 := range s0set {
+		var parts []string
+		for s1 := minS1; s1 <= maxS1; s1++ {
+			if is2D[key{s0, s1}] {
+				v := GetAt(kv, prefix, fmt.Sprintf("[%d,%d]", s0, s1))
+				parts = append(parts, v.String())
+			}
+		}
+		aggVals[fmt.Sprintf("[%d]", s0)] = strings.Join(parts, "\t")
+	}
+
+	seen := map[int]bool{}
+	var out []string
+	for _, c := range children {
+		var s0, s1 int
+		if n, _ := fmt.Sscanf(c, "[%d,%d]", &s0, &s1); n == 2 && is2D[key{s0, s1}] {
+			if !seen[s0] {
+				seen[s0] = true
+				out = append(out, fmt.Sprintf("[%d]", s0))
+			}
+		} else {
+			out = append(out, c)
+		}
+	}
+	return out, aggVals
+}
+
 // ── tree print ────────────────────────────────────────────────────────────
 
 func FprintChildren(w io.Writer, kv KVSpace, prefix, indent string, showExt bool) {
@@ -135,10 +195,12 @@ func FprintChildren(w io.Writer, kv KVSpace, prefix, indent string, showExt bool
 		children = StripExtChildren(kv, prefix, children)
 	}
 
+	children, aggVals := collapse2D(kv, prefix, children)
+
 	slots, nonslots := SplitSlots(kv, prefix, children)
 	// 先打印 [x,y] 二维 slot table
 	if len(slots) > 0 {
-		fprintSlotTable(w, kv, prefix, indent, slots)
+		fprintSlotTable(w, kv, prefix, indent, slots, aggVals)
 	}
 
 	// 构建非 slot 条目，目录与文件分离
@@ -185,44 +247,19 @@ func FprintChildren(w io.Writer, kv KVSpace, prefix, indent string, showExt bool
 	}
 }
 
-func fprintSlotTable(w io.Writer, kv KVSpace, prefix, indent string, slots []string) {
-	type slot struct{ s0, s1 int; val string }
-	var rows []slot
-	minS1, maxS1, maxS0 := 0, 0, 0
-	for _, s := range slots {
-		var s0, s1 int
-		if n, _ := fmt.Sscanf(s, "[%d,%d]", &s0, &s1); n != 2 {
-			panic("fprintSlotTable: invalid slot name " + s)
-		}
-		v := GetAt(kv, prefix, s)
-		val := "(nil)"
-		if !v.IsNil() { val = v.String() }
-		rows = append(rows, slot{s0, s1, val})
-		if s1 < minS1 { minS1 = s1 }
-		if s1 > maxS1 { maxS1 = s1 }
-		if s0 > maxS0 { maxS0 = s0 }
-	}
-	grid := make([][]string, maxS0+1)
-	for i := range grid {
-		row := make([]string, maxS1-minS1+1)
-		for j := range row { row[j] = "" }
-		grid[i] = row
-	}
-	for _, r := range rows { grid[r.s0][r.s1-minS1] = r.val }
-
-	colOrder := make([]int, 0, maxS1-minS1+1)
-	for s1 := -1; s1 >= minS1; s1-- { colOrder = append(colOrder, s1) }
-	for s1 := 0; s1 <= maxS1; s1++ { colOrder = append(colOrder, s1) }
-
-	for s0 := 0; s0 <= maxS0; s0++ {
+func fprintSlotTable(w io.Writer, kv KVSpace, prefix, indent string, slots []string, aggVals map[string]string) {
+	for i, s := range slots {
 		branch := "├── "
-		if s0 == maxS0 { branch = "└── " }
-		fmt.Fprintf(w, "%s%s[%d]", indent, branch, s0)
-		for _, s1 := range colOrder {
-			fmt.Fprintf(w, "\t%s", grid[s0][s1-minS1])
-		}
-		fmt.Fprintln(w)
+		if i == len(slots)-1 { branch = "└── " }
+		fmt.Fprintf(w, "%s%s%s\t%s\n", indent, branch, s, slotVal(kv, prefix, s, aggVals))
 	}
+}
+
+func slotVal(kv KVSpace, prefix, name string, aggVals map[string]string) string {
+	if v, ok := aggVals[name]; ok { return v }
+	v := GetAt(kv, prefix, name)
+	if v.IsNil() { return "(nil)" }
+	return v.String()
 }
 
 func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt bool) {

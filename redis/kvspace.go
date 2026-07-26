@@ -178,59 +178,96 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 	ctx := bg
 	pipe := r.rdb.Pipeline()
 
+	type childEntry struct{ parent, name string }
+	var children []childEntry
+
 	for _, p := range pairs {
 		key, val := p.Key, p.Val
 		resolved := r.resolvePath(ctx, key)
 
 		if isDir(resolved) {
-			r.setDir(ctx, pipe, resolved, val)
+			parent, name := parentName(resolved)
+			kvspace.MkIndexRecursive(r, parent)
+			pipe.Set(ctx, resolved, kvspace.EncodeXValue(val), 0)
+			children = append(children, childEntry{parent, name})
 		} else {
-			r.setFile(ctx, pipe, resolved, val)
+			parent, name := parentName(resolved)
+			kvspace.MkIndexRecursive(r, parent)
+
+			var extT string
+			if data, err := r.rdb.Get(ctx, parent).Bytes(); err == nil {
+				if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
+					_, extT = kvspace.DecodeExtIndex(v)
+				}
+			} else if err != goredis.Nil {
+				panic(fmt.Errorf("%w: setFile parent=%s err=%v", kvspace.ErrGet, parent, err))
+			}
+			if extT != "" {
+				localNodes := r.readDirIndex(ctx, parent)
+				localExists := false
+				for _, n := range localNodes {
+					if n == name { localExists = true; break }
+				}
+				if !localExists {
+					extNodes := r.readDirIndex(ctx, extT)
+					for _, n := range extNodes {
+						if n == name {
+							panic(fmt.Errorf("%w: %s", kvspace.ErrExtWrite, resolved))
+						}
+					}
+				}
+			}
+
+			pipe.Set(ctx, resolved, kvspace.EncodeXValue(val), 0)
+			children = append(children, childEntry{parent, name})
+		}
+	}
+
+	// Batch all child additions: read each parent index once, merge all pending
+	// children, then write once via pipeline. This avoids the read-after-write
+	// race where addChild reads stale data when called repeatedly in one pipeline.
+	parentChildren := make(map[string][]string, len(children))
+	for _, c := range children {
+		parentChildren[c.parent] = append(parentChildren[c.parent], c.name)
+	}
+	for parent, names := range parentChildren {
+		data, err := r.rdb.Get(ctx, parent).Bytes()
+		if err != nil && err != goredis.Nil {
+			panic(fmt.Errorf("%w: addChild %s err=%v", kvspace.ErrGet, parent, err))
+		}
+		var nodes []string
+		var extpath string
+		isExt := false
+		if err != goredis.Nil {
+			v := kvspace.DecodeXValue(data)
+			switch v.Kind() {
+			case kvspace.KindIndex:
+				nodes = kvspace.DecodeIndex(v)
+				if len(nodes) == 1 && nodes[0] == "" { nodes = nil }
+			case kvspace.KindExtIndex:
+				nodes, extpath = kvspace.DecodeExtIndex(v)
+				isExt = true
+			}
+		}
+		seen := make(map[string]bool, len(nodes)+len(names))
+		for _, n := range nodes {
+			seen[n] = true
+		}
+		for _, n := range names {
+			if !seen[n] {
+				nodes = append(nodes, n)
+				seen[n] = true
+			}
+		}
+		if isExt {
+			pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewExtIndexValue(nodes, extpath)), 0)
+		} else {
+			pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewIndexValue(nodes)), 0)
 		}
 	}
 
 	_, err := pipe.Exec(ctx)
 	return err
-}
-
-func (r *redisImpl) setFile(ctx context.Context, pipe goredis.Pipeliner, path string, val kvspace.XValue) {
-	parent, name := parentName(path)
-	kvspace.MkIndexRecursive(r, parent)
-
-	var extT string
-	if data, err := r.rdb.Get(ctx, parent).Bytes(); err == nil {
-		if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
-			_, extT = kvspace.DecodeExtIndex(v)
-		}
-	} else if err != goredis.Nil {
-		panic(fmt.Errorf("%w: setFile parent=%s err=%v", kvspace.ErrGet, parent, err))
-	}
-	if extT != "" {
-		localNodes := r.readDirIndex(ctx, parent)
-		localExists := false
-		for _, n := range localNodes {
-			if n == name { localExists = true; break }
-		}
-		if !localExists {
-			extNodes := r.readDirIndex(ctx, extT)
-			for _, n := range extNodes {
-				if n == name {
-					panic(fmt.Errorf("%w: %s", kvspace.ErrExtWrite, path))
-				}
-			}
-		}
-	}
-
-	pipe.Set(ctx, path, kvspace.EncodeXValue(val), 0)
-	r.addChild(ctx, pipe, parent, name)
-}
-
-func (r *redisImpl) setDir(ctx context.Context, pipe goredis.Pipeliner, path string, val kvspace.XValue) {
-	parent, name := parentName(path)
-	kvspace.MkIndexRecursive(r, parent)
-
-	pipe.Set(ctx, path, kvspace.EncodeXValue(val), 0)
-	r.addChild(ctx, pipe, parent, name)
 }
 
 // ── List ──────────────────────────────────────────────────────────────────────

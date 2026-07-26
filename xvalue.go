@@ -3,6 +3,7 @@ package kvspace
 import (
 	"encoding/binary"
 	"strconv"
+	"strings"
 )
 
 // XValue 是 kvspace 中存储的类型化值。
@@ -51,34 +52,46 @@ func (v XValue) ArrayLen() int32 {
 
 // ── Stringer ─────────────────────────────────────────────────────────────
 
-// String 实现 fmt.Stringer，输出 "kind[N]:repr" 调试格式。
+// String 实现 fmt.Stringer。单值输出 "kind:repr"；多值数组输出 "kind:[elem0, elem1, ...]"。
 func (v XValue) String() string {
 	n := v.ArrayLen()
-	tag := v.kind
-	if n > 1 { tag = v.kind + "[" + strconv.Itoa(int(n)) + "]" }
+	if n > 1 {
+		parts := make([]string, n)
+		for i := int32(0); i < n; i++ {
+			parts[i] = valueRepr(v.Index(int(i)))
+		}
+		return v.kind + ":[" + strings.Join(parts, ", ") + "]"
+	}
+	if v.kind == KindLinkIndex {
+		return "→" + string(v.raw)
+	}
+	return v.kind + ":" + valueRepr(v)
+}
+
+func valueRepr(v XValue) string {
 	switch v.kind {
 	case "", KindNull:
 		return KindNull
 	case "int8", "int16", "int32", "int64":
-		return tag + ":" + strconv.FormatInt(v.Int64(), 10)
+		return strconv.FormatInt(v.Int64(), 10)
 	case "uint8", "uint16", "uint32", "uint64":
-		return tag + ":" + strconv.FormatUint(v.Uint64(), 10)
+		return strconv.FormatUint(v.Uint64(), 10)
 	case "float32":
-		return tag + ":" + strconv.FormatFloat(float64(v.Float32()), 'f', -1, 32)
+		return strconv.FormatFloat(float64(v.Float32()), 'f', -1, 32)
 	case "float64":
-		return tag + ":" + strconv.FormatFloat(v.Float64(), 'f', -1, 64)
+		return strconv.FormatFloat(v.Float64(), 'f', -1, 64)
 	case "bool":
-		return tag + ":" + strconv.FormatBool(v.Bool())
+		return strconv.FormatBool(v.Bool())
 	case "string":
-		return tag + ":" + v.Str()
+		return v.Str()
 	case "time":
-		return tag + ":" + strconv.FormatInt(v.TimeNs(), 10)
+		return strconv.FormatInt(v.TimeNs(), 10)
 	case "rwir":
-		return "rwir:" + string(v.raw)
+		return string(v.raw)
 	case KindLinkIndex:
 		return "→" + string(v.raw)
 	default:
-		return tag + ":" + string(v.raw)
+		return string(v.raw)
 	}
 }
 
