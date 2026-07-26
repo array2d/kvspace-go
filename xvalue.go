@@ -52,26 +52,82 @@ func (v XValue) ArrayLen() int32 {
 
 // ── Stringer ─────────────────────────────────────────────────────────────
 
-// String 实现 fmt.Stringer。单值输出 "kind:repr"；多值数组输出 "kind:[elem0, elem1, ...]"。
+// String 实现 fmt.Stringer。
+// 引用（raw 长度与 kind 预期不匹配）："name:kind"
+// 值（raw 匹配）："kind:value"
+// 数组："kind:[elem0, elem1, ...]"
 func (v XValue) String() string {
 	n := v.ArrayLen()
 	if n > 1 {
 		parts := make([]string, n)
 		for i := int32(0); i < n; i++ {
-			parts[i] = valueRepr(v.Index(int(i)))
+			parts[i] = plainRepr(v.Index(int(i)))
 		}
 		return v.kind + ":[" + strings.Join(parts, ", ") + "]"
 	}
 	if v.kind == KindLinkIndex {
 		return "→" + string(v.raw)
 	}
-	return v.kind + ":" + valueRepr(v)
+	return valueRepr(v)
 }
 
+// valueRepr 返回带 kind 标签的完整显示字符串。引用: name:kind，值: kind:value。
 func valueRepr(v XValue) string {
 	switch v.kind {
 	case "", KindNull:
 		return KindNull
+	case "rwir":
+		return plainRepr(v) + ":" + v.kind
+	case "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+		"float32", "float64", "bool", "time":
+		if int32(len(v.raw)) < kindBytes(v.kind) {
+			return plainRepr(v) + ":" + v.kind
+		}
+		return v.kind + ":" + plainRepr(v)
+	case "string":
+		return v.kind + ":" + plainRepr(v)
+	case KindLinkIndex:
+		return "→" + string(v.raw)
+	default:
+		if len(v.raw) > 0 {
+			return plainRepr(v) + ":" + v.kind
+		}
+		return v.kind
+	}
+}
+
+// plainRepr 返回纯值表示（无 kind 前缀），供数组元素和 valueRepr 使用。
+func plainRepr(v XValue) string {
+	switch v.kind {
+	case "", KindNull:
+		return KindNull
+	case "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+		"float32", "float64", "bool", "time":
+		if int32(len(v.raw)) < kindBytes(v.kind) {
+			return string(v.raw)
+		}
+		return numRepr(v)
+	case "string":
+		return v.Str()
+	case "rwir":
+		return string(v.raw)
+	default:
+		return string(v.raw)
+	}
+}
+
+func kindBytes(k string) int32 {
+	switch k {
+	case KindBool, "int8", KindUint8: return 1
+	case "int16", KindUint16: return 2
+	case KindInt32, KindUint32, KindFloat32: return 4
+	case KindInt64, KindUint64, KindFloat64, "time": return 8
+	default: return 0
+	}
+}
+
+func numRepr(v XValue) string {
+	switch v.kind {
 	case "int8", "int16", "int32", "int64":
 		return strconv.FormatInt(v.Int64(), 10)
 	case "uint8", "uint16", "uint32", "uint64":
@@ -82,17 +138,10 @@ func valueRepr(v XValue) string {
 		return strconv.FormatFloat(v.Float64(), 'f', -1, 64)
 	case "bool":
 		return strconv.FormatBool(v.Bool())
-	case "string":
-		return v.Str()
 	case "time":
 		return strconv.FormatInt(v.TimeNs(), 10)
-	case "rwir":
-		return string(v.raw)
-	case KindLinkIndex:
-		return "→" + string(v.raw)
-	default:
-		return string(v.raw)
 	}
+	return string(v.raw)
 }
 
 // ── TLV 编解码 ───────────────────────────────────────────────────────────
