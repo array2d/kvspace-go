@@ -45,4 +45,8 @@ const (
 	KindIndex     = "index"
 	KindLinkIndex = "linkindex" // 纯链接，写穿透到目标
 	KindExtIndex  = "extindex"  // 扩展索引，写留在上层
+
+	KindRwir   = "rwir"   // 原子读写指令槽
+	KindRwfunc = "rwfunc" // 函数定义（复合 rwir）
+	KindLabel  = "label"  // label 块
 )
