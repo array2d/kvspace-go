@@ -43,7 +43,7 @@ func main() {
 		if len(sub) < 2 { exitUsage("kvspace get <key1> [key2 ...]") }
 		for _, k := range sub[1:] {
 			v := kvspace.GetOne(kv, k)
-			if v.IsNil() { fmt.Printf("%s\t(nil)\n", k) } else { fmt.Printf("%s\t%s\n", k, v) }
+			if v.IsNone() { fmt.Printf("%s\t(nil)\n", k) } else { fmt.Printf("%s\t%s\n", k, v) }
 		}
 	case "set":
 		if len(sub) < 3 { exitUsage("kvspace set <key> <value>") }

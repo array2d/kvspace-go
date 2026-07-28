@@ -83,12 +83,12 @@ func FprintList(w io.Writer, kv KVSpace, prefix string, showExt bool) {
 		hasDir := len(kv.List(childDir)) > 0
 		if !hasDir {
 			dirV := GetAt(kv, prefix, c+DirIndexSuf)
-			hasDir = !dirV.IsNil()
+			hasDir = !dirV.IsNone()
 		}
 		if hasDir {
 			fmt.Fprintf(w, "%s/\n", c)
 		}
-		if !v.IsNil() {
+		if !v.IsNone() {
 			fmt.Fprintf(w, "%s\t%s\n", c, v)
 		}
 	}
@@ -216,10 +216,10 @@ func FprintChildren(w io.Writer, kv KVSpace, prefix, indent string, showExt bool
 		hasDir := len(kv.List(childDir)) > 0
 		if !hasDir {
 			dirV := GetAt(kv, prefix, c+DirIndexSuf)
-			hasDir = !dirV.IsNil()
+			hasDir = !dirV.IsNone()
 		}
 		if hasDir {
-			if !v.IsNil() {
+			if !v.IsNone() {
 				items = append(items, item{c + DirIndexSuf, XValue{}, childDir})
 				items = append(items, item{c, v, ""})
 			} else {
@@ -234,7 +234,7 @@ func FprintChildren(w io.Writer, kv KVSpace, prefix, indent string, showExt bool
 		last := i == len(items)-1
 		branch := "├── "
 		if last { branch = "└── " }
-		if !it.val.IsNil() {
+		if !it.val.IsNone() {
 			fmt.Fprintf(w, "%s%s%s\t%s\n", indent, branch, it.name, it.val)
 		} else {
 			fmt.Fprintf(w, "%s%s%s\n", indent, branch, it.name)
@@ -258,7 +258,7 @@ func fprintSlotTable(w io.Writer, kv KVSpace, prefix, indent string, slots []str
 func slotVal(kv KVSpace, prefix, name string, aggVals map[string]string) string {
 	if v, ok := aggVals[name]; ok { return v }
 	v := GetAt(kv, prefix, name)
-	if v.IsNil() { return "(nil)" }
+	if v.IsNone() { return "(nil)" }
 	return v.String()
 }
 
@@ -331,7 +331,7 @@ func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
 			p += DirIndexSuf
 		}
 		vals := kv.Get(p, []string{l})
-		if len(vals) > 0 && !vals[0].IsNil() {
+		if len(vals) > 0 && !vals[0].IsNone() {
 			fn(clean, vals[0])
 		}
 	}

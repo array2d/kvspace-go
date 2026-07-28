@@ -18,7 +18,7 @@ type XValue struct {
 
 // ── 判断 ─────────────────────────────────────────────────────────────────
 
-func (v XValue) IsNil() bool  { return v.kind == "" || v.kind == KindNull }
+func (v XValue) IsNone() bool { return v.kind == "" }
 func (v XValue) Kind() string { return v.kind }
 
 // Null returns the explicit null XValue.
@@ -151,7 +151,7 @@ func numRepr(v XValue) string {
 // arraylength 默认=1（单值），>1 表示数组。
 
 func EncodeXValue(v XValue) []byte {
-	if v.IsNil() { return nil }
+	if v.IsNone() { return nil }
 	al := v.arraylength
 	if al <= 0 { al = 1 }
 	buf := make([]byte, 1+len(v.kind)+4+4+len(v.raw))
@@ -179,7 +179,7 @@ func DecodeXValue(data []byte) XValue {
 }
 
 func EncodedXSize(v XValue) int {
-	if v.IsNil() { return 0 }
+	if v.IsNone() { return 0 }
 	return 1 + len(v.kind) + 4 + 4 + len(v.raw)
 }
 
