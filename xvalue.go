@@ -21,8 +21,8 @@ type XValue struct {
 func (v XValue) IsNone() bool { return v.kind == "" }
 func (v XValue) Kind() string { return v.kind }
 
-// Null returns the explicit null XValue.
-func Null() XValue { return XValue{kind: KindNull} }
+// None returns the explicit none XValue.
+func None() XValue { return XValue{kind: KindNone} }
 
 // RawBytes 返回底层原始字节（任意 kind）。不拷贝，调用方不得修改。
 func (v XValue) RawBytes() []byte { return v.raw }
@@ -74,8 +74,8 @@ func (v XValue) String() string {
 // valueRepr 返回带 kind 标签的完整显示字符串。引用: name:kind，值: kind:value。
 func valueRepr(v XValue) string {
 	switch v.kind {
-	case "", KindNull:
-		return KindNull
+	case "":
+		return KindNone
 	case "rwir":
 		return plainRepr(v) + ":" + v.kind
 	case "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
@@ -99,8 +99,8 @@ func valueRepr(v XValue) string {
 // plainRepr 返回纯值表示（无 kind 前缀），供数组元素和 valueRepr 使用。
 func plainRepr(v XValue) string {
 	switch v.kind {
-	case "", KindNull:
-		return KindNull
+	case "":
+		return KindNone
 	case "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
 		"float32", "float64", "bool", "time":
 		if int32(len(v.raw)) < kindBytes(v.kind) {

@@ -54,7 +54,7 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 				panic(fmt.Errorf("%w: ext fallback key=%s err=%v", kvspace.ErrGet, targetKey, err))
 			}
 		}
-		results[i] = kvspace.Null()
+		results[i] = kvspace.None()
 	}
 	return results
 }
@@ -62,7 +62,7 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
 	data, err := r.rdb.Get(ctx, dir).Bytes()
 	if err != nil {
-		if err == goredis.Nil { return kvspace.Null() }
+		if err == goredis.Nil { return kvspace.None() }
 		panic(fmt.Errorf("%w: getDir %s err=%v", kvspace.ErrGet, dir, err))
 	}
 	return kvspace.DecodeXValue(data)
@@ -409,7 +409,7 @@ func (r *redisImpl) Watch(key string, timeout time.Duration) kvspace.XValue {
 	resolved := r.resolvePath(ctx, key)
 	results, err := r.rdb.BLPop(ctx, timeout, notifyPrefix+resolved).Result()
 	if err != nil || len(results) < 2 {
-		return kvspace.Null()
+		return kvspace.None()
 	}
 	return kvspace.DecodeXValue([]byte(results[1]))
 }

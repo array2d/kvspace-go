@@ -282,6 +282,9 @@ func SepPath(path string) (prefix, last string) {
 		return PathSep, ""
 	}
 	i := strings.LastIndexByte(path, PathSep[0])
+	if i < 0 {
+		return "", path
+	}
 	if i == 0 {
 		return PathSep, path[1:]
 	}
