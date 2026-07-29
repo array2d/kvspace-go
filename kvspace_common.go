@@ -12,7 +12,7 @@ import (
 func ParseValue(raw string) (XValue, error) {
 	idx := strings.Index(raw, ":")
 	if idx < 0 {
-		return Str(raw), nil
+		return String(raw), nil
 	}
 	kind, repr := raw[:idx], raw[idx+1:]
 	switch kind {
@@ -38,7 +38,7 @@ func ParseValue(raw string) (XValue, error) {
 			return XValue{}, fmt.Errorf("invalid bool: %q", repr)
 		}
 	case "string":
-		return Str(repr), nil
+		return String(repr), nil
 	case "nil":
 		return XValue{}, nil
 	default:

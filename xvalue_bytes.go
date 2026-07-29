@@ -2,16 +2,12 @@ package kvspace
 
 // ── 字符串 ────────────────────────────────────────────────────────────────
 
-func Str(v string) XValue { return XValue{kind: KindString, arraylength: 1, raw: []byte(v)} }
+func String(v string) XValue { return XValue{kind: KindString, arraylength: 1, raw: []byte(v)} }
 
 func (v XValue) Str() string {
 	if v.kind != KindString { return "" }
 	return string(v.raw)
 }
-
-// ── rwir 指令槽 ────────────────────────────────────────────────────────────
-
-func Rwir(v string) XValue { return XValue{kind: "rwir", arraylength: 1, raw: []byte(v)} }
 
 // ── 字节数组 ──────────────────────────────────────────────────────────────
 

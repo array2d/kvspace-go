@@ -43,10 +43,61 @@ func RawN(kind string, raw []byte, n int32) XValue {
 	return XValue{kind: kind, arraylength: n, raw: c}
 }
 
+// ── rwir / rwfunc 专用构造函数 ──────────────────────────────────────────
+//
+// 设计：计数存于 XValue 固定字段，运行时零判断零解析。
+//
+//   rwir:  arraylength = (numReads<<16) | numWrites   raw = sig bytes
+//   rwfunc: arraylength = numInsts                     raw = [2B LE:reads][2B LE:writes][sig...]
+
+// Rwir 构造 kind="rwir" 的 XValue。arraylength 打包读写参数量，raw 存签名。
+func Rwir(numReads, numWrites int32, sig []byte) XValue {
+	raw := make([]byte, len(sig))
+	copy(raw, sig)
+	return XValue{kind: KindRwir, arraylength: (numReads << 16) | (numWrites & 0xFFFF), raw: raw}
+}
+
+// RwirReads 返回 rwir 读参数量。零判断，直读 arraylength。
+func (v XValue) RwirReads() int32 { return v.arraylength >> 16 }
+
+// RwirWrites 返回 rwir 写参数量。零判断，直读 arraylength。
+func (v XValue) RwirWrites() int32 { return v.arraylength & 0xFFFF }
+
+// RwirSig 返回 rwir 签名正文。raw 即 sig。
+func (v XValue) RwirSig() string { return string(v.raw) }
+
+const rwfuncRawHeader = 4 // 2B reads + 2B writes
+
+// Rwfunc 构造 kind="rwfunc" 的 XValue。arraylength=指令数，raw 头部存读写参数量+签名。
+func Rwfunc(numInsts, numReads, numWrites int32, sig []byte) XValue {
+	raw := make([]byte, rwfuncRawHeader+len(sig))
+	binary.LittleEndian.PutUint16(raw[0:2], uint16(numReads))
+	binary.LittleEndian.PutUint16(raw[2:4], uint16(numWrites))
+	copy(raw[4:], sig)
+	return XValue{kind: KindRwfunc, arraylength: numInsts, raw: raw}
+}
+
+// RwfuncInsts 返回 rwfunc 指令数。零判断，直读 arraylength。
+func (v XValue) RwfuncInsts() int32 { return v.arraylength }
+
+// RwfuncReads 返回 rwfunc 读参数量。固定偏移，零判断。
+func (v XValue) RwfuncReads() int32 { return int32(binary.LittleEndian.Uint16(v.raw[0:2])) }
+
+// RwfuncWrites 返回 rwfunc 写参数量。固定偏移，零判断。
+func (v XValue) RwfuncWrites() int32 { return int32(binary.LittleEndian.Uint16(v.raw[2:4])) }
+
+// RwfuncSig 返回 rwfunc 签名正文（跳过 4B 头）。
+func (v XValue) RwfuncSig() string {
+	if len(v.raw) >= rwfuncRawHeader { return string(v.raw[4:]) }
+	return string(v.raw)
+}
+
 // ArrayLen 返回数组长度。单值返回 1，未初始化返回 0。
 func (v XValue) ArrayLen() int32 {
 	if v.kind == "" { return 0 }
-	if v.arraylength <= 0 { return 1 }
+	if v.arraylength < 0 {
+		 panic("XValue.ArrayLen: negative arraylength")
+	}
 	return v.arraylength
 }
 
@@ -76,8 +127,10 @@ func valueRepr(v XValue) string {
 	switch v.kind {
 	case "":
 		return KindNone
-	case "rwir":
-		return plainRepr(v) + ":" + v.kind
+	case KindRwir:
+		return v.RwirSig() + ":" + v.kind
+	case KindRwfunc:
+		return v.RwfuncSig() + ":" + v.kind
 	case "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
 		"float32", "float64", "bool", "time":
 		if int32(len(v.raw)) < kindBytes(v.kind) {
@@ -109,8 +162,10 @@ func plainRepr(v XValue) string {
 		return numRepr(v)
 	case "string":
 		return v.Str()
-	case "rwir":
-		return string(v.raw)
+	case KindRwir:
+		return v.RwirSig()
+	case KindRwfunc:
+		return v.RwfuncSig()
 	default:
 		return string(v.raw)
 	}

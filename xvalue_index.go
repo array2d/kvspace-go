@@ -44,5 +44,3 @@ func DecodeExtIndex(v XValue) (childs []string, extpath string) {
 
 // HasExtRef 判定 XValue 是否持有 extindex 引用（link 或 extindex）。
 func HasExtRef(v XValue) bool { return v.Kind() == KindLinkIndex || v.Kind() == KindExtIndex }
-
-// ── link ───────────────────────────────────────────────────────────
