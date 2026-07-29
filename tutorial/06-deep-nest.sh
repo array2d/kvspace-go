@@ -2,17 +2,18 @@
 # expected:
 # === deep tree ===
 # /deep/a/b/c/d/e/f	int64:6
-# a
+# a/
 # /deep/a/b/c	int64:3
-# d
-# c
+# d/
+# c/
+# c	int64:3
 # === deltree mid ===
 # /deep/a/b/c/d/e/f	(nil)
 # /deep/a/b/c/d/e	(nil)
 # /deep/a/b/c	int64:3
 # === deltree leaf ===
 # /deep/a/b/c	(nil)
-# a
+# a/
 # /end
 
 set -e
@@ -44,3 +45,4 @@ echo "=== deltree leaf ==="
 $KV deltree /deep/a/b/
 $KV get /deep/a/b/c
 $KV list /deep/
+

@@ -66,21 +66,21 @@ func StripExtChildren(kv KVSpace, prefix string, children []string) []string {
 	if extTarget == "" {
 		return children
 	}
-	extChildren := kv.List(extTarget)
+	extChildren := kv.List(extTarget, false)
 	return children[:len(children)-len(extChildren)]
 }
 
 // FprintList 打印 prefix 的直接子项。
 // showExt=false 时，先打印自己的 children，再以 =exttarget/ 标记缩进打印 ext 子项。
 func FprintList(w io.Writer, kv KVSpace, prefix string, showExt bool) {
-	children := kv.List(prefix)
+	children := kv.List(prefix, true)
 	if !showExt {
 		children = StripExtChildren(kv, prefix, children)
 	}
 	for _, c := range children {
 		v := GetAt(kv, prefix, c)
 		childDir := JoinPath(prefix, c) + DirIndexSuf
-		hasDir := len(kv.List(childDir)) > 0
+		hasDir := len(kv.List(childDir, false)) > 0
 		if !hasDir {
 			dirV := GetAt(kv, prefix, c+DirIndexSuf)
 			hasDir = !dirV.IsNone()
@@ -95,7 +95,7 @@ func FprintList(w io.Writer, kv KVSpace, prefix string, showExt bool) {
 	if !showExt {
 		if ext := ReadPrefixExt(kv, prefix); ext != "" {
 			fmt.Fprintln(w, ExtIndexHead+ext)
-			for _, c := range kv.List(ext) {
+			for _, c := range kv.List(ext, false) {
 				fmt.Fprintln(w, "  "+c)
 			}
 		}
@@ -112,7 +112,7 @@ func SplitSlots(kv KVSpace, prefix string, children []string) (slots, nonslots [
 	for _, c := range children {
 		if strings.HasPrefix(c, "[") && strings.HasSuffix(c, "]") {
 			childDir := JoinPath(prefix, c) + DirIndexSuf
-			if len(kv.List(childDir)) > 0 {
+			if len(kv.List(childDir, false)) > 0 {
 				nonslots = append(nonslots, c)
 			} else {
 				slots = append(slots, c)
@@ -135,7 +135,7 @@ func collapse2D(kv KVSpace, prefix string, children []string) ([]string, map[str
 		var s0, s1 int
 		if n, _ := fmt.Sscanf(c, "[%d,%d]", &s0, &s1); n == 2 {
 			// 只聚合叶子 [s0,s1]：有 childs 的目录保留原样
-			if len(kv.List(JoinPath(prefix, c)+DirIndexSuf)) == 0 {
+			if len(kv.List(JoinPath(prefix, c)+DirIndexSuf, false)) == 0 {
 				is2D[key{s0, s1}] = true
 			}
 		}
@@ -187,7 +187,7 @@ func collapse2D(kv KVSpace, prefix string, children []string) ([]string, map[str
 // ── tree print ────────────────────────────────────────────────────────────
 
 func FprintChildren(w io.Writer, kv KVSpace, prefix, indent string, showExt bool) {
-	children := kv.List(prefix)
+	children := kv.List(prefix, true)
 	if !showExt {
 		for _, e := range ListDirExt(kv, prefix) {
 			fmt.Fprintf(w, "%s%s\n", indent, e)
@@ -213,7 +213,7 @@ func FprintChildren(w io.Writer, kv KVSpace, prefix, indent string, showExt bool
 	for _, c := range nonslots {
 		v := GetAt(kv, prefix, c)
 		childDir := JoinPath(prefix, c) + DirIndexSuf
-		hasDir := len(kv.List(childDir)) > 0
+		hasDir := len(kv.List(childDir, false)) > 0
 		if !hasDir {
 			dirV := GetAt(kv, prefix, c+DirIndexSuf)
 			hasDir = !dirV.IsNone()
@@ -310,7 +310,7 @@ func MkIndexRecursive(kv KVSpace, path string) {
 }
 
 func dirExists(kv KVSpace, parentDir, name string) bool {
-	for _, m := range kv.List(parentDir) {
+	for _, m := range kv.List(parentDir, false) {
 		if m == name { return true }
 	}
 	return false
@@ -338,7 +338,7 @@ func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
 			fn(clean, vals[0])
 		}
 	}
-	for _, c := range kv.List(prefix) {
+	for _, c := range kv.List(prefix, false) {
 		Walk(kv, JoinPath(prefix, c)+DirIndexSuf, fn)
 	}
 }

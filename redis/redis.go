@@ -35,9 +35,6 @@ func ConnPool(dsn string) kvspace.KVSpace {
 		MinIdleConns: 4,
 		PoolTimeout:  10 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second,
 	})
-	if redisLogLv > 0 {
-		rdb.AddHook(&logHook{})
-	}
 	return &redisImpl{rdb: rdb}
 }
 

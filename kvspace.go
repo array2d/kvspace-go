@@ -32,7 +32,7 @@ type KVSpace interface {
 	Set(pairs []KVPair) error                  // 写入并维护目录索引,pre路径如果不存在，则汇报异常
 
 	// ── 目录操作 ─────────────────────────────────────────────────────────
-	List(prefix string) []string // 列出直接子项名
+	List(prefix string, expandExt bool) []string // 列出直接子项名；expandExt 合并 extindex 子项
 	Del(keys ...string) error    // 精确删除（含索引清理）
 	DelTree(prefix string) error // 递归删除；prefix 本身是链接则只删链接
 

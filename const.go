@@ -48,5 +48,5 @@ const (
 
 	KindRwir   = "rwir"   // 原子读写指令槽
 	KindRwfunc = "rwfunc" // 函数定义（复合 rwir）
-	KindLabel  = "label"  // label 块
+	KindScope  = "scope"  // 函数内 {} 作用域（lower 产物）
 )

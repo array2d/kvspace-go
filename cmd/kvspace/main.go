@@ -83,7 +83,7 @@ func main() {
 		cmdWatch(kv, sub[1:])
 	case "notify":
 		if len(sub) < 3 { exitUsage("kvspace notify <key> <value>") }
-		if err := kv.Notify(sub[1], kvspace.Str(sub[2])); err != nil { fatalf("%v", err) }
+		if err := kv.Notify(sub[1], kvspace.String(sub[2])); err != nil { fatalf("%v", err) }
 	case "clear":
 		if err := kv.Clear(); err != nil { fatalf("%v", err) }
 	default:

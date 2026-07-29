@@ -4,20 +4,20 @@
 # /lnk/x	int64:42
 # /lnk/y	int64:7
 # === list through ===
-# x
-# y
-# z
+# x	int64:42
+# y	int64:7
+# z	string:hello
 # === write through ===
 # /tgt/w	int64:99
-# x
-# y
-# z
-# w
+# x	int64:42
+# y	int64:7
+# z	string:hello
+# w	int64:99
 # === del through link ===
 # /tgt/y	(nil)
-# x
-# z
-# w
+# x	int64:42
+# z	string:hello
+# w	int64:99
 # === del link body ===
 # /lnk	(nil)
 # /tgt/x	int64:42
@@ -53,3 +53,4 @@ echo "=== del link body ==="
 $KV del /lnk
 $KV get /lnk
 $KV get /tgt/x
+

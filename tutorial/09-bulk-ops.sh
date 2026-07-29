@@ -12,7 +12,7 @@
 # /b/d/a	(nil)
 # /b/e/b	(nil)
 # /b/f/c	int64:6
-# c
+# c	int64:6
 # /end
 
 set -e
@@ -47,3 +47,4 @@ $KV set /b/f/c int:6
 $KV del /b/d/a /b/e/b
 $KV get /b/d/a /b/e/b /b/f/c
 $KV list /b/f/
+

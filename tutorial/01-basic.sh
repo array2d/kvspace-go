@@ -3,9 +3,9 @@
 # === Set & Get ===
 # /t01/a	int64:42
 # === Set & List ===
-# a
-# b
-# c
+# a	int64:42
+# b	int64:7
+# c	string:hello
 # === Get bulk ===
 # /t01/a	int64:42
 # /t01/b	int64:7
@@ -14,8 +14,8 @@
 # /t01/nonexist	(nil)
 # === Del ===
 # /t01/a	(nil)
-# b
-# c
+# b	int64:7
+# c	string:hello
 # /end
 
 set -e
@@ -42,3 +42,4 @@ echo "=== Del ==="
 $KV del /t01/a
 $KV get /t01/a
 $KV list /t01/
+

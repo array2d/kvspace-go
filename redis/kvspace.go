@@ -272,7 +272,7 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
-func (r *redisImpl) List(prefix string) []string {
+func (r *redisImpl) List(prefix string, expandExt bool) []string {
 	ctx := bg
 	assertDir(prefix)
 	resolved := r.resolvePath(ctx, prefix)
@@ -282,17 +282,18 @@ func (r *redisImpl) List(prefix string) []string {
 
 	members := r.readDirIndex(ctx, resolved)
 
-	var extT string
-	if data, err := r.rdb.Get(ctx, resolved).Bytes(); err == nil {
-		if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
-			_, extT = kvspace.DecodeExtIndex(v)
-		}
-	} else if err != goredis.Nil {
-		panic(fmt.Errorf("%w: List prefix=%s err=%v", kvspace.ErrGet, prefix, err))
-	}
 	var extMembers []string
-	if extT != "" {
-		extMembers = r.readDirIndex(ctx, extT)
+	if expandExt {
+		if data, err := r.rdb.Get(ctx, resolved).Bytes(); err == nil {
+			if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
+				_, extT := kvspace.DecodeExtIndex(v)
+				if extT != "" {
+					extMembers = r.readDirIndex(ctx, extT)
+				}
+			}
+		} else if err != goredis.Nil {
+			panic(fmt.Errorf("%w: List prefix=%s err=%v", kvspace.ErrGet, prefix, err))
+		}
 	}
 
 	localSet := make(map[string]bool, len(members))

@@ -2,13 +2,13 @@
 # expected:
 # === dir with value and child ===
 # /dv	int64:99
-# x
+# x	int64:1
 # /dv/x	int64:1
 # /dv/x/y	int64:2
-# y
+# y	int64:2
 # == del value keeps children ===
 # /dv2/x	int64:42
-# x
+# x	int64:42
 # /end
 
 set -e
@@ -34,3 +34,4 @@ $KV set /dv2/x int:42
 $KV del /dv2
 $KV get /dv2/x
 $KV list /dv2/
+

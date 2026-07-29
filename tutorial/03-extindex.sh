@@ -8,27 +8,27 @@
 # /merge/z	string:upper_only
 # /base/z	(nil)
 # === list merge ===
-# z
-# a
-# b
-# c
+# z	string:upper_only
+# a	int64:1
+# b	int64:2
+# c	int64:3
 # === del upper key ===
 # /merge/z	(nil)
-# a
-# b
-# c
+# a	int64:1
+# b	int64:2
+# c	int64:3
 # === nested write ===
 # /merge/nest/x	int64:42
 # /merge/nest/y	int64:43
 # /base/nest/x	(nil)
-# x
-# y
+# x	int64:42
+# y	int64:43
 # === deltree preserves base ===
 # /merge/a	(nil)
 # /base/a	int64:1
-# a
-# b
-# c
+# a	int64:1
+# b	int64:2
+# c	int64:3
 # /end
 
 set -e
@@ -71,3 +71,4 @@ $KV deltree /merge/
 $KV get /merge/a
 $KV get /base/a
 $KV list /base/
+
