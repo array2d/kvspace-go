@@ -196,185 +196,137 @@ func FprintArray2D(w io.Writer, kv KVSpace, prefix string, showExt, showKind boo
 	}
 }
 
-// ── tree helpers ──────────────────────────────────────────────────────────
+// ── common helpers ────────────────────────────────────────────────────────
 
 func GetAt(kv KVSpace, dir, name string) XValue {
 	return kv.Get(dir, []string{name})[0]
 }
 
-func SplitSlots(kv KVSpace, prefix string, children []string) (slots, nonslots []string) {
-	for _, c := range children {
-		if strings.HasPrefix(c, "[") && strings.HasSuffix(c, "]") {
-			childDir := JoinPath(prefix, c) + DirIndexSuf
-			if len(kv.List(childDir, false)) > 0 {
-				nonslots = append(nonslots, c)
-			} else {
-				slots = append(slots, c)
-			}
-		} else {
-			nonslots = append(nonslots, c)
-		}
-	}
-	return
-}
+// ── tree ─────────────────────────────────────────────────────────────────
 
-// ── 2D slot collapse ──────────────────────────────────────────────────────
-
-// collapse2D 将 [s0,s1] 按 s0 聚合为 [s0]，返回新 children 和合成值。
-// kvlang 指令序列：[s0,0]=opcode, [s0,s1<0]=读参(左), [s0,s1>0]=写参(右) → 汇编式行。
-func collapse2D(kv KVSpace, prefix string, children []string) ([]string, map[string]string) {
-	type key struct{ s0, s1 int }
-	is2D := map[key]bool{}
-	for _, c := range children {
-		var s0, s1 int
-		if n, _ := fmt.Sscanf(c, "[%d,%d]", &s0, &s1); n == 2 {
-			// 只聚合叶子 [s0,s1]：有 childs 的目录保留原样
-			if len(kv.List(JoinPath(prefix, c)+DirIndexSuf, false)) == 0 {
-				is2D[key{s0, s1}] = true
-			}
-		}
-	}
-	if len(is2D) == 0 {
-		return children, nil
-	}
-
-	s0set, minS1, maxS1 := map[int]bool{}, 0, 0
-	first := true
-	for k := range is2D {
-		s0set[k.s0] = true
-		if first {
-			minS1, maxS1, first = k.s1, k.s1, false
-		} else {
-			if k.s1 < minS1 { minS1 = k.s1 }
-			if k.s1 > maxS1 { maxS1 = k.s1 }
-		}
-	}
-
-	aggVals := map[string]string{}
-	for s0 := range s0set {
-		var parts []string
-		for s1 := -1; s1 >= minS1; s1-- {
-			if is2D[key{s0, s1}] {
-				v := GetAt(kv, prefix, fmt.Sprintf("[%d,%d]", s0, s1))
-				parts = append(parts, v.String())
-			}
-		}
-		if is2D[key{s0, 0}] {
-			v := GetAt(kv, prefix, fmt.Sprintf("[%d,0]", s0))
-			parts = append(parts, v.String())
-		}
-		for s1 := 1; s1 <= maxS1; s1++ {
-			if is2D[key{s0, s1}] {
-				v := GetAt(kv, prefix, fmt.Sprintf("[%d,%d]", s0, s1))
-				parts = append(parts, v.String())
-			}
-		}
-		aggVals[fmt.Sprintf("[%d]", s0)] = strings.Join(parts, "\t")
-	}
-
-	seen := map[int]bool{}
-	var out []string
-	for _, c := range children {
-		var s0, s1 int
-		if n, _ := fmt.Sscanf(c, "[%d,%d]", &s0, &s1); n == 2 && is2D[key{s0, s1}] {
-			if !seen[s0] {
-				seen[s0] = true
-				out = append(out, fmt.Sprintf("[%d]", s0))
-			}
-		} else {
-			out = append(out, c)
-		}
-	}
-	return out, aggVals
-}
-
-// ── tree print ────────────────────────────────────────────────────────────
-
-func FprintChildren(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKind bool) {
+func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKind bool) {
 	children := kv.List(prefix, true)
 	if !showExt {
-		for _, e := range ListDirExt(kv, prefix) {
-			fmt.Fprintf(w, "%s%s\n", indent, e)
-		}
 		children = StripExtChildren(kv, prefix, children)
 	}
 
-	children, aggVals := collapse2D(kv, prefix, children)
-
-	slots, nonslots := SplitSlots(kv, prefix, children)
-	// 先打印 [x,y] 二维 slot table
-	if len(slots) > 0 {
-		fprintSlotTable(w, kv, prefix, indent, slots, aggVals)
-	}
-
-	// 构建非 slot 条目，目录与文件分离
-	type item struct {
-		name     string
-		val      XValue
+	type entry struct {
+		is2D    bool
+		name    string
+		val     XValue
 		childDir string
+		s0      int
+		slots   []struct {
+			s1  int
+			val XValue
+		}
 	}
-	var items []item
-	for _, c := range nonslots {
-		v := GetAt(kv, prefix, c)
+
+	// group [s0,s1] by s0, regular as-is
+	type slot struct{ s0, s1 int; val XValue }
+	twoD := map[int][]slot{}
+	var ordered []entry
+
+	for _, c := range children {
+		var s0, s1 int
+		if n, _ := fmt.Sscanf(c, "[%d,%d]", &s0, &s1); n == 2 {
+			v := GetAt(kv, prefix, c)
+			twoD[s0] = append(twoD[s0], slot{s0, s1, v})
+		} else {
+			ordered = append(ordered, entry{name: c})
+		}
+	}
+
+	// insert 2D rows before first regular entry (same as array2d order)
+	s0keys := make([]int, 0, len(twoD))
+	for k := range twoD { s0keys = append(s0keys, k) }
+	sort.Ints(s0keys)
+
+	twoDEntries := make([]entry, 0, len(s0keys))
+	for _, s0 := range s0keys {
+		slots := twoD[s0]
+		sort.Slice(slots, func(i, j int) bool { return slots[i].s1 < slots[j].s1 })
+		conv := make([]struct{ s1 int; val XValue }, len(slots))
+		for i, s := range slots { conv[i] = struct{ s1 int; val XValue }{s.s1, s.val} }
+		twoDEntries = append(twoDEntries, entry{is2D: true, s0: s0, slots: conv})
+	}
+
+	// prepend 2D entries
+	ordered = append(twoDEntries, ordered...)
+
+	// fill val/childDir for regular entries
+	for i := range ordered {
+		if ordered[i].is2D {
+			continue
+		}
+		c := ordered[i].name
+		ordered[i].val = GetAt(kv, prefix, c)
 		childDir := JoinPath(prefix, c) + DirIndexSuf
-		hasDir := len(kv.List(childDir, false)) > 0
-		if !hasDir {
-			dirV := GetAt(kv, prefix, c+DirIndexSuf)
-			hasDir = !dirV.IsNone()
-		}
-		if hasDir {
-			if !v.IsNone() {
-				items = append(items, item{c + DirIndexSuf, XValue{}, childDir})
-				items = append(items, item{c, v, ""})
-			} else {
-				items = append(items, item{c + DirIndexSuf, XValue{}, childDir})
-			}
-		} else {
-			items = append(items, item{c, v, ""})
+		if len(kv.List(childDir, false)) > 0 {
+			ordered[i].childDir = childDir
+		} else if dirV := GetAt(kv, prefix, c+DirIndexSuf); !dirV.IsNone() {
+			ordered[i].childDir = childDir
 		}
 	}
 
-	for i, it := range items {
-		last := i == len(items)-1
+	for i, e := range ordered {
+		last := i == len(ordered)-1
 		branch := "├── "
-		if last { branch = "└── " }
-		if !it.val.IsNone() {
-			if showKind {
-				fmt.Fprintf(w, "%s%s%s\t%s\t%s\n", indent, branch, it.name, it.val.Kind(), it.val.Plain())
-			} else {
-				fmt.Fprintf(w, "%s%s%s\t%s\n", indent, branch, it.name, it.val.Plain())
+		nextIndent := indent + "│   "
+		if last {
+			branch = "└── "
+			nextIndent = indent + "    "
+		}
+
+		if e.is2D {
+			slots := e.slots
+			minS1, maxS1 := slots[0].s1, slots[len(slots)-1].s1
+			fmt.Fprintf(w, "%s%s[%d,%d~%d]", indent, branch, e.s0, minS1, maxS1)
+			for _, s := range slots {
+				if showKind {
+					fmt.Fprintf(w, "\t%s:%s", s.val.Kind(), s.val.Plain())
+				} else {
+					fmt.Fprintf(w, "\t%s", s.val.Plain())
+				}
 			}
+			fmt.Fprintln(w)
 		} else {
-			fmt.Fprintf(w, "%s%s%s\n", indent, branch, it.name)
+			key := e.name
+			if e.childDir != "" { key += "/" }
+			if e.childDir != "" {
+				if e.val.IsNone() {
+					fmt.Fprintf(w, "%s%s%s\n", indent, branch, key)
+				} else if showKind {
+					fmt.Fprintf(w, "%s%s%s\t%s\t%s\n", indent, branch, key, e.val.Kind(), e.val.Plain())
+				} else {
+					fmt.Fprintf(w, "%s%s%s\t%s\n", indent, branch, key, e.val.Plain())
+				}
+				FprintTree(w, kv, e.childDir, nextIndent, showExt, showKind)
+			} else {
+				if e.val.IsNone() {
+					fmt.Fprintf(w, "%s%s%s\n", indent, branch, key)
+				} else if showKind {
+					fmt.Fprintf(w, "%s%s%s\t%s\t%s\n", indent, branch, key, e.val.Kind(), e.val.Plain())
+				} else {
+					fmt.Fprintf(w, "%s%s%s\t%s\n", indent, branch, key, e.val.Plain())
+				}
+			}
 		}
-		next := indent + "│   "
-		if last { next = indent + "    " }
-		if it.childDir != "" {
-			FprintChildren(w, kv, it.childDir, next, showExt, showKind)
+	}
+
+	// ext 标记
+	if !showExt {
+		if ext := ReadPrefixExt(kv, prefix); ext != "" {
+			lastExt := len(ordered) == 0
+			if lastExt {
+				fmt.Fprintf(w, "%s└── %s\n", indent, ExtIndexHead+ext)
+			} else {
+				fmt.Fprintf(w, "%s└── %s\n", indent, ExtIndexHead+ext)
+			}
 		}
 	}
 }
 
-func fprintSlotTable(w io.Writer, kv KVSpace, prefix, indent string, slots []string, aggVals map[string]string) {
-	for i, s := range slots {
-		branch := "├── "
-		if i == len(slots)-1 { branch = "└── " }
-		fmt.Fprintf(w, "%s%s%s\t%s\n", indent, branch, s, slotVal(kv, prefix, s, aggVals))
-	}
-}
-
-func slotVal(kv KVSpace, prefix, name string, aggVals map[string]string) string {
-	if v, ok := aggVals[name]; ok { return v }
-	v := GetAt(kv, prefix, name)
-	if v.IsNone() { return "(nil)" }
-	return v.String()
-}
-
-func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKind bool) {
-	FprintChildren(w, kv, prefix, indent, showExt, showKind)
-}
-
-// JoinPath 连接父路径与子名，父路径已含尾 / 时不重复插入。
 func JoinPath(parent, child string) string {
 	if parent == PathSep {
 		return PathSep + child

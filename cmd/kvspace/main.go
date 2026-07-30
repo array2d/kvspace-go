@@ -21,7 +21,7 @@ func main() {
 	dsn := fs.String("kvspace", defaultKVSpace(), "kvspace DSN (redis://host:port)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvspace [--kvspace dsn] <subcommand> [args]")
-		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mkindex link unlink extindex list tree dump watch notify clear")
+		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mkindex link unlink extindex list array2d tree dump watch notify clear")
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[1:])
@@ -125,8 +125,9 @@ func cmdWatch(kv kvspace.KVSpace, args []string) {
 func cmdTree(kv kvspace.KVSpace, args []string) {
 	fs := flag.NewFlagSet("tree", flag.ExitOnError)
 	showExt := fs.Bool("showext", true, "expand extindex entries (=target/)")
+	showKind := fs.Bool("kind", false, "show kind column")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: kvspace tree [--showext] <prefix>")
+		fmt.Fprintln(os.Stderr, "usage: kvspace tree [--showext --kind] <prefix>")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
@@ -135,7 +136,7 @@ func cmdTree(kv kvspace.KVSpace, args []string) {
 	root := strings.TrimSuffix(p, kvspace.DirIndexSuf)
 	if root == "" { root = kvspace.PathSep }
 	fmt.Println(root)
-	kvspace.FprintTree(os.Stdout, kv, p, "", *showExt, false)
+	kvspace.FprintTree(os.Stdout, kv, p, "", *showExt, *showKind)
 }
 
 func cmdArray2D(kv kvspace.KVSpace, args []string) {

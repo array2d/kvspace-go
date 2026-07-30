@@ -8,10 +8,10 @@
 # └── a	1
 # === tree showext false ===
 # /ext
-# …/base/
 # ├── z	42
 # └── x/
 #     └── z	99
+# └── …/base/
 # /end
 
 set -e
@@ -31,6 +31,8 @@ $KV tree /ext/
 
 echo "=== tree showext false ==="
 $KV tree --showext=false /ext/
+
+
 
 
 
