@@ -14,6 +14,10 @@ const (
 
 var (
 	ErrDirMustEndWithSlash = errors.New("kvspace: index must end with /")
+	ErrInvalidPath         = errors.New("kvspace: path must be absolute and canonical")
+	ErrInvalidDirValue     = errors.New("kvspace: directory value must be kind=index")
+	ErrInvalidValue        = errors.New("kvspace: value cannot be encoded and decoded losslessly")
+	ErrDisconnected        = errors.New("kvspace: connection is disconnected")
 	ErrGet                 = errors.New("kvspace: GET")
 	ErrPipeExec            = errors.New("kvspace: pipeline exec")
 	ErrResolve             = errors.New("kvspace: 路径解析 GET")
@@ -23,7 +27,10 @@ var (
 	ErrNotDir              = errors.New("kvspace: 父路径不是目录")
 	ErrParentNotFound      = errors.New("kvspace: 父目录不存在")
 	ErrExtCascade          = errors.New("kvspace: ExtIndex 不容许级联")
+	ErrExtTarget           = errors.New("kvspace: ExtIndex target must be an existing ordinary index")
+	ErrExtCollision        = errors.New("kvspace: ExtIndex local and extension children overlap")
 	ErrLinkTypeMismatch    = errors.New("kvspace: Link target 和 linkpath 类型不一致")
+	ErrLinkPathExists      = errors.New("kvspace: Link path already contains a non-link value")
 )
 
 // ── XValueHead kind ──────────────────────────────────────────────────────────────
