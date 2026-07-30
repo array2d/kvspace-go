@@ -133,14 +133,14 @@ func (r *redisImpl) removeChild(ctx context.Context, pipe goredis.Pipeliner, par
 		if len(nodes) == 1 && nodes[0] == "" { nodes = nil }
 		filtered := make([]string, 0, len(nodes))
 		for _, n := range nodes {
-			if n != name { filtered = append(filtered, n) }
+			if n != name && n != name+kvspace.DirIndexSuf { filtered = append(filtered, n) }
 		}
 		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewIndexValue(filtered)), 0)
 	case kvspace.KindExtIndex:
 		childs, extpath := kvspace.DecodeExtIndex(v)
 		filtered := make([]string, 0, len(childs))
 		for _, c := range childs {
-			if c != name { filtered = append(filtered, c) }
+			if c != name && c != name+kvspace.DirIndexSuf { filtered = append(filtered, c) }
 		}
 		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewExtIndexValue(filtered, extpath)), 0)
 	}
@@ -164,7 +164,7 @@ func (r *redisImpl) Mkindex(path string) error {
 		}
 		parent, name := parentName(cur)
 		pipe := r.rdb.Pipeline()
-		r.addChild(ctx, pipe, parent, name)
+		r.addChild(ctx, pipe, parent, name + kvspace.DirIndexSuf)
 		if _, err := pipe.Exec(ctx); err != nil {
 			return fmt.Errorf("%w: Mkindex %s err=%v", kvspace.ErrPipeExec, cur, err)
 		}
@@ -185,11 +185,19 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 		key, val := p.Key, p.Val
 		resolved := r.resolvePath(ctx, key)
 
+		if strings.Contains(resolved, "//") {
+			panic(fmt.Errorf("Set: double-slash in key %q", resolved))
+		}
+		k := val.Kind()
+		if (k == kvspace.KindIndex || k == kvspace.KindExtIndex) && !isDir(resolved) {
+			panic(fmt.Errorf("Set: index/extindex value at non-directory key %q", resolved))
+		}
+
 		if isDir(resolved) {
 			parent, name := parentName(resolved)
 			kvspace.MkIndexRecursive(r, parent)
 			pipe.Set(ctx, resolved, kvspace.EncodeXValue(val), 0)
-			children = append(children, childEntry{parent, name})
+			children = append(children, childEntry{parent, name + kvspace.DirIndexSuf})
 		} else {
 			parent, name := parentName(resolved)
 			kvspace.MkIndexRecursive(r, parent)
@@ -436,6 +444,7 @@ func (r *redisImpl) Link(target, linkpath string) error {
 
 	pipe := r.rdb.Pipeline()
 	pipe.Set(ctx, storeKey, kvspace.EncodeXValue(kvspace.NewLinkValue(target)), 0)
+	if isDir(resolved) { name += kvspace.DirIndexSuf }
 	r.addChild(ctx, pipe, parent, name)
 	_, err := pipe.Exec(ctx)
 	return err
@@ -464,7 +473,7 @@ func (r *redisImpl) ExtIndex(path, extpath string) error {
 	pipe := r.rdb.Pipeline()
 	val := kvspace.NewExtIndexValue(nil, extpath)
 	pipe.Set(ctx, resolved, kvspace.EncodeXValue(val), 0)
-	r.addChild(ctx, pipe, parent, name)
+	r.addChild(ctx, pipe, parent, name + kvspace.DirIndexSuf)
 	_, err := pipe.Exec(ctx)
 	return err
 }

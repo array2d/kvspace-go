@@ -2,6 +2,7 @@ package kvspace
 
 import (
 	"encoding/binary"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -169,6 +170,24 @@ func plainRepr(v XValue) string {
 		return v.RwirSig()
 	case KindRwfunc:
 		return v.RwfuncSig()
+	case KindIndex:
+		children := DecodeIndex(v)
+		if len(children) == 0 {
+			return "(empty)"
+		}
+		if len(children) <= 2 {
+			return strings.Join(children, ", ")
+		}
+		return fmt.Sprintf("%s, … (%d)", strings.Join(children[:2], ", "), len(children))
+	case KindExtIndex:
+		childs, extpath := DecodeExtIndex(v)
+		if extpath != "" {
+			return extpath
+		}
+		if len(childs) == 0 {
+			return "(empty ext)"
+		}
+		return fmt.Sprintf("… (%d local)", len(childs))
 	default:
 		return string(v.raw)
 	}

@@ -245,7 +245,15 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 	twoDEntries := make([]entry, 0, len(s0keys))
 	for _, s0 := range s0keys {
 		slots := twoD[s0]
-		sort.Slice(slots, func(i, j int) bool { return slots[i].s1 < slots[j].s1 })
+		sort.Slice(slots, func(i, j int) bool {
+			a, b := slots[i].s1, slots[j].s1
+			if a < 0 && b < 0 { return a > b }
+			if a < 0 { return true }
+			if b < 0 { return false }
+			if a == 0 { return true }
+			if b == 0 { return false }
+			return a < b
+		})
 		conv := make([]struct{ s1 int; val XValue }, len(slots))
 		for i, s := range slots { conv[i] = struct{ s1 int; val XValue }{s.s1, s.val} }
 		twoDEntries = append(twoDEntries, entry{is2D: true, s0: s0, slots: conv})
@@ -254,6 +262,15 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 	// prepend 2D entries
 	ordered = append(twoDEntries, ordered...)
 
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].is2D != ordered[j].is2D { return ordered[i].is2D }
+		a, b := ordered[i].name, ordered[j].name
+		// 同名时非目录在前（"main" 在 "main/" 之前）
+		as, bs := strings.TrimSuffix(a, DirIndexSuf), strings.TrimSuffix(b, DirIndexSuf)
+		if as == bs { return !strings.HasSuffix(a, DirIndexSuf) }
+		return as < bs
+	})
+
 	// fill val/childDir for regular entries
 	for i := range ordered {
 		if ordered[i].is2D {
@@ -261,10 +278,10 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 		}
 		c := ordered[i].name
 		ordered[i].val = GetAt(kv, prefix, c)
-		childDir := JoinPath(prefix, c) + DirIndexSuf
+		childDir := JoinPath(prefix, strings.TrimSuffix(c, DirIndexSuf)) + DirIndexSuf
 		if len(kv.List(childDir, false)) > 0 {
 			ordered[i].childDir = childDir
-		} else if dirV := GetAt(kv, prefix, c+DirIndexSuf); !dirV.IsNone() {
+		} else if dirV := GetAt(kv, prefix, strings.TrimSuffix(c, DirIndexSuf)+DirIndexSuf); !dirV.IsNone() {
 			ordered[i].childDir = childDir
 		}
 	}
@@ -280,7 +297,11 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 
 		if e.is2D {
 			slots := e.slots
-			minS1, maxS1 := slots[0].s1, slots[len(slots)-1].s1
+			minS1, maxS1 := slots[0].s1, slots[0].s1
+				for _, s := range slots {
+					if s.s1 < minS1 { minS1 = s.s1 }
+					if s.s1 > maxS1 { maxS1 = s.s1 }
+				}
 			fmt.Fprintf(w, "%s%s[%d,%d~%d]", indent, branch, e.s0, minS1, maxS1)
 			for _, s := range slots {
 				if showKind {
@@ -292,15 +313,8 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 			fmt.Fprintln(w)
 		} else {
 			key := e.name
-			if e.childDir != "" { key += "/" }
-			if e.childDir != "" {
-				if e.val.IsNone() {
-					fmt.Fprintf(w, "%s%s%s\n", indent, branch, key)
-				} else if showKind {
-					fmt.Fprintf(w, "%s%s%s\t%s\t%s\n", indent, branch, key, e.val.Kind(), e.val.Plain())
-				} else {
-					fmt.Fprintf(w, "%s%s%s\t%s\n", indent, branch, key, e.val.Plain())
-				}
+			if e.childDir != "" && strings.HasSuffix(e.name, DirIndexSuf) {
+				fmt.Fprintf(w, "%s%s%s\n", indent, branch, key)
 				FprintTree(w, kv, e.childDir, nextIndent, showExt, showKind)
 			} else {
 				if e.val.IsNone() {
@@ -371,7 +385,7 @@ func MkIndexRecursive(kv KVSpace, path string) {
 
 func dirExists(kv KVSpace, parentDir, name string) bool {
 	for _, m := range kv.List(parentDir, false) {
-		if m == name { return true }
+		if m == name || m == name+DirIndexSuf { return true }
 	}
 	return false
 }

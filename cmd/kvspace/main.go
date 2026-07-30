@@ -133,9 +133,7 @@ func cmdTree(kv kvspace.KVSpace, args []string) {
 	fs.Parse(args)
 	if fs.NArg() == 0 { fs.Usage(); os.Exit(1) }
 	p := fs.Arg(0)
-	root := strings.TrimSuffix(p, kvspace.DirIndexSuf)
-	if root == "" { root = kvspace.PathSep }
-	fmt.Println(root)
+	fmt.Println(p)
 	kvspace.FprintTree(os.Stdout, kv, p, "", *showExt, *showKind)
 }
 
