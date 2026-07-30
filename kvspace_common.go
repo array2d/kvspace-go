@@ -143,8 +143,20 @@ func FprintArray2D(w io.Writer, kv KVSpace, prefix string, showExt, showKind boo
 
 	for _, s0 := range s0keys {
 		slots := twoD[s0]
-		sort.Slice(slots, func(i, j int) bool { return slots[i].s1 < slots[j].s1 })
-		minS1, maxS1 := slots[0].s1, slots[len(slots)-1].s1
+		sort.Slice(slots, func(i, j int) bool {
+			a, b := slots[i].s1, slots[j].s1
+			if a < 0 && b < 0 { return a > b }
+			if a < 0 { return true }
+			if b < 0 { return false }
+			if a == 0 { return true }
+			if b == 0 { return false }
+			return a < b
+		})
+		minS1, maxS1 := slots[0].s1, slots[0].s1
+		for _, s := range slots {
+			if s.s1 < minS1 { minS1 = s.s1 }
+			if s.s1 > maxS1 { maxS1 = s.s1 }
+		}
 
 		fmt.Fprintf(w, "[%d,%d~%d]", s0, minS1, maxS1)
 		for _, s := range slots {
@@ -241,7 +253,17 @@ func collapse2D(kv KVSpace, prefix string, children []string) ([]string, map[str
 	aggVals := map[string]string{}
 	for s0 := range s0set {
 		var parts []string
-		for s1 := minS1; s1 <= maxS1; s1++ {
+		for s1 := -1; s1 >= minS1; s1-- {
+			if is2D[key{s0, s1}] {
+				v := GetAt(kv, prefix, fmt.Sprintf("[%d,%d]", s0, s1))
+				parts = append(parts, v.String())
+			}
+		}
+		if is2D[key{s0, 0}] {
+			v := GetAt(kv, prefix, fmt.Sprintf("[%d,0]", s0))
+			parts = append(parts, v.String())
+		}
+		for s1 := 1; s1 <= maxS1; s1++ {
 			if is2D[key{s0, s1}] {
 				v := GetAt(kv, prefix, fmt.Sprintf("[%d,%d]", s0, s1))
 				parts = append(parts, v.String())
