@@ -3,6 +3,7 @@ package kvspace
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -72,7 +73,7 @@ func StripExtChildren(kv KVSpace, prefix string, children []string) []string {
 
 // FprintList 打印 prefix 的直接子项。
 // showExt=false 时，先打印自己的 children，再以 =exttarget/ 标记缩进打印 ext 子项。
-func FprintList(w io.Writer, kv KVSpace, prefix string, showExt bool) {
+func FprintList(w io.Writer, kv KVSpace, prefix string, showExt, showKind bool) {
 	children := kv.List(prefix, true)
 	if !showExt {
 		children = StripExtChildren(kv, prefix, children)
@@ -85,11 +86,17 @@ func FprintList(w io.Writer, kv KVSpace, prefix string, showExt bool) {
 			dirV := GetAt(kv, prefix, c+DirIndexSuf)
 			hasDir = !dirV.IsNone()
 		}
+
+		key := c
 		if hasDir {
-			fmt.Fprintf(w, "%s/\n", c)
+			key += "/"
 		}
-		if !v.IsNone() {
-			fmt.Fprintf(w, "%s\t%s\n", c, v)
+		if v.IsNone() {
+			fmt.Fprintf(w, "%s\n", key)
+		} else if showKind {
+			fmt.Fprintf(w, "%s\t%s\t%s\n", key, v.Kind(), v.Plain())
+		} else {
+			fmt.Fprintf(w, "%s\t%s\n", key, v.Plain())
 		}
 	}
 	if !showExt {
@@ -98,6 +105,81 @@ func FprintList(w io.Writer, kv KVSpace, prefix string, showExt bool) {
 			for _, c := range kv.List(ext, false) {
 				fmt.Fprintln(w, "  "+c)
 			}
+		}
+	}
+}
+
+// ── array2d ──────────────────────────────────────────────────────────────
+
+// FprintArray2D 按 list 风格打印，但将 [s0,s1] 二维 key 折叠为单行：
+//
+//	[0,-2~1]	v-2	v-1	v0	v1
+//
+// 非 [s0,s1] 的条目按 list 格式显示。
+func FprintArray2D(w io.Writer, kv KVSpace, prefix string, showExt, showKind bool) {
+	children := kv.List(prefix, true)
+	if !showExt {
+		children = StripExtChildren(kv, prefix, children)
+	}
+
+	type slot struct{ s0, s1 int; name string; val XValue }
+	twoD := map[int][]slot{}
+	var regular []string
+
+	for _, c := range children {
+		var s0, s1 int
+		if n, _ := fmt.Sscanf(c, "[%d,%d]", &s0, &s1); n == 2 {
+			v := GetAt(kv, prefix, c)
+			twoD[s0] = append(twoD[s0], slot{s0, s1, c, v})
+		} else {
+			regular = append(regular, c)
+		}
+	}
+
+	// 打印折叠后的二维行（按 s0 升序）
+	s0keys := make([]int, 0, len(twoD))
+	for k := range twoD { s0keys = append(s0keys, k) }
+	sort.Ints(s0keys)
+
+	for _, s0 := range s0keys {
+		slots := twoD[s0]
+		sort.Slice(slots, func(i, j int) bool { return slots[i].s1 < slots[j].s1 })
+		minS1, maxS1 := slots[0].s1, slots[len(slots)-1].s1
+
+		fmt.Fprintf(w, "[%d,%d~%d]", s0, minS1, maxS1)
+		for _, s := range slots {
+			if showKind {
+				fmt.Fprintf(w, "\t%s:%s", s.val.Kind(), s.val.Plain())
+			} else {
+				fmt.Fprintf(w, "\t%s", s.val.Plain())
+			}
+		}
+		fmt.Fprintln(w)
+	}
+
+	// 非二维条目按 list 格式打印
+	for _, c := range regular {
+		v := GetAt(kv, prefix, c)
+		childDir := JoinPath(prefix, c) + DirIndexSuf
+		hasDir := len(kv.List(childDir, false)) > 0
+		if !hasDir {
+			dirV := GetAt(kv, prefix, c+DirIndexSuf)
+			hasDir = !dirV.IsNone()
+		}
+		key := c
+		if hasDir { key += "/" }
+		if v.IsNone() {
+			fmt.Fprintf(w, "%s\n", key)
+		} else if showKind {
+			fmt.Fprintf(w, "%s\t%s\t%s\n", key, v.Kind(), v.Plain())
+		} else {
+			fmt.Fprintf(w, "%s\t%s\n", key, v.Plain())
+		}
+	}
+
+	if !showExt {
+		if ext := ReadPrefixExt(kv, prefix); ext != "" {
+			fmt.Fprintln(w, ExtIndexHead+ext)
 		}
 	}
 }
@@ -186,7 +268,7 @@ func collapse2D(kv KVSpace, prefix string, children []string) ([]string, map[str
 
 // ── tree print ────────────────────────────────────────────────────────────
 
-func FprintChildren(w io.Writer, kv KVSpace, prefix, indent string, showExt bool) {
+func FprintChildren(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKind bool) {
 	children := kv.List(prefix, true)
 	if !showExt {
 		for _, e := range ListDirExt(kv, prefix) {
@@ -235,14 +317,18 @@ func FprintChildren(w io.Writer, kv KVSpace, prefix, indent string, showExt bool
 		branch := "├── "
 		if last { branch = "└── " }
 		if !it.val.IsNone() {
-			fmt.Fprintf(w, "%s%s%s\t%s\n", indent, branch, it.name, it.val)
+			if showKind {
+				fmt.Fprintf(w, "%s%s%s\t%s\t%s\n", indent, branch, it.name, it.val.Kind(), it.val.Plain())
+			} else {
+				fmt.Fprintf(w, "%s%s%s\t%s\n", indent, branch, it.name, it.val.Plain())
+			}
 		} else {
 			fmt.Fprintf(w, "%s%s%s\n", indent, branch, it.name)
 		}
 		next := indent + "│   "
 		if last { next = indent + "    " }
 		if it.childDir != "" {
-			FprintChildren(w, kv, it.childDir, next, showExt)
+			FprintChildren(w, kv, it.childDir, next, showExt, showKind)
 		}
 	}
 }
@@ -262,8 +348,8 @@ func slotVal(kv KVSpace, prefix, name string, aggVals map[string]string) string 
 	return v.String()
 }
 
-func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt bool) {
-	FprintChildren(w, kv, prefix, indent, showExt)
+func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKind bool) {
+	FprintChildren(w, kv, prefix, indent, showExt, showKind)
 }
 
 // JoinPath 连接父路径与子名，父路径已含尾 / 时不重复插入。

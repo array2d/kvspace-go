@@ -70,6 +70,8 @@ func main() {
 		if err := kv.ExtIndex(sub[1], sub[2]); err != nil { fatalf("%v", err) }
 	case "list":
 		cmdList(kv, sub[1:])
+	case "array2d":
+		cmdArray2D(kv, sub[1:])
 	case "tree":
 		cmdTree(kv, sub[1:])
 	case "dump":
@@ -98,13 +100,14 @@ func fatalf(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...); os.Exit(
 func cmdList(kv kvspace.KVSpace, args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	showExt := fs.Bool("showext", true, "include extindex entries")
+	showKind := fs.Bool("kind", true, "show kind column")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: kvspace list [--showext] <prefix>")
+		fmt.Fprintln(os.Stderr, "usage: kvspace list [--showext --kind] <prefix>")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
 	if fs.NArg() == 0 { fs.Usage(); os.Exit(1) }
-	kvspace.FprintList(os.Stdout, kv, fs.Arg(0), *showExt)
+	kvspace.FprintList(os.Stdout, kv, fs.Arg(0), *showExt, *showKind)
 }
 
 func cmdWatch(kv kvspace.KVSpace, args []string) {
@@ -132,5 +135,18 @@ func cmdTree(kv kvspace.KVSpace, args []string) {
 	root := strings.TrimSuffix(p, kvspace.DirIndexSuf)
 	if root == "" { root = kvspace.PathSep }
 	fmt.Println(root)
-	kvspace.FprintTree(os.Stdout, kv, p, "", *showExt)
+	kvspace.FprintTree(os.Stdout, kv, p, "", *showExt, false)
+}
+
+func cmdArray2D(kv kvspace.KVSpace, args []string) {
+	fs := flag.NewFlagSet("array2d", flag.ExitOnError)
+	showExt := fs.Bool("showext", true, "include extindex entries")
+	showKind := fs.Bool("kind", false, "show kind column")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: kvspace array2d [--showext --kind] <prefix>")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() == 0 { fs.Usage(); os.Exit(1) }
+	kvspace.FprintArray2D(os.Stdout, kv, fs.Arg(0), *showExt, *showKind)
 }

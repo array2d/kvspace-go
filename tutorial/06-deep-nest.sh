@@ -5,8 +5,7 @@
 # a/
 # /deep/a/b/c	int64:3
 # d/
-# c/
-# c	int64:3
+# c/	int64	3
 # === deltree mid ===
 # /deep/a/b/c/d/e/f	(nil)
 # /deep/a/b/c/d/e	(nil)
@@ -45,4 +44,6 @@ echo "=== deltree leaf ==="
 $KV deltree /deep/a/b/
 $KV get /deep/a/b/c
 $KV list /deep/
+
+
 

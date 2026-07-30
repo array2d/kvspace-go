@@ -27,6 +27,9 @@ func None() XValue { return XValue{kind: KindNone} }
 // RawBytes 返回底层原始字节（任意 kind）。不拷贝，调用方不得修改。
 func (v XValue) RawBytes() []byte { return v.raw }
 
+// Plain 返回纯值表示（无 kind 前缀），如 "42", "hello"。
+func (v XValue) Plain() string { return plainRepr(v) }
+
 // Raw 构造任意 vtype 的 XValue（用于第三方 vtype 扩展，如 "tensor"、"rwir"）。
 // raw 会被复制，调用方可安全复用原缓冲区。
 // arraylength 默认=1（单值）。

@@ -2,16 +2,16 @@
 # expected:
 # === tree showext true ===
 # /ext
-# ├── z	int64:42
+# ├── z	42
 # ├── x/
-# │   └── z	int64:99
-# └── a	int64:1
+# │   └── z	99
+# └── a	1
 # === tree showext false ===
 # /ext
 # …/base/
-# ├── z	int64:42
+# ├── z	42
 # └── x/
-#     └── z	int64:99
+#     └── z	99
 # /end
 
 set -e
@@ -31,4 +31,6 @@ $KV tree /ext/
 
 echo "=== tree showext false ==="
 $KV tree --showext=false /ext/
+
+
 

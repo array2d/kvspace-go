@@ -3,8 +3,8 @@
 # === tree shows dir and file ===
 # /
 # ├── b/
-# │   └── x	int64:1
-# └── b	string:value
+# │   └── x	1
+# └── b	value
 # /end
 
 set -e
@@ -17,3 +17,5 @@ $KV set /b/x int:1
 
 echo "=== tree shows dir and file ==="
 $KV tree --showext=false /
+
+
