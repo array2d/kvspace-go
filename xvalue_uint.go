@@ -29,7 +29,6 @@ func (v Uint8) At(idx int) uint8 {
 	return v.xvaluebody[idx]
 }
 
-func AsUint8(v XValue) uint8              { return v.(Uint8).At(0) }
 func DecodeUint8(xvaluebody []byte) Uint8 { return Uint8{xvaluebody: xvaluebody} }
 
 // ── Uint16 ───────────────────────────────────────────────────────────────
@@ -56,7 +55,6 @@ func (v Uint16) At(idx int) uint16 {
 	return binary.LittleEndian.Uint16(v.xvaluebody[idx*2:])
 }
 
-func AsUint16(v XValue) uint16              { return v.(Uint16).At(0) }
 func DecodeUint16(xvaluebody []byte) Uint16 { return Uint16{xvaluebody: xvaluebody} }
 
 // ── Uint32 ───────────────────────────────────────────────────────────────
@@ -83,7 +81,6 @@ func (v Uint32) At(idx int) uint32 {
 	return binary.LittleEndian.Uint32(v.xvaluebody[idx*4:])
 }
 
-func AsUint32(v XValue) uint32              { return v.(Uint32).At(0) }
 func DecodeUint32(xvaluebody []byte) Uint32 { return Uint32{xvaluebody: xvaluebody} }
 
 // ── Uint64 ───────────────────────────────────────────────────────────────
@@ -110,5 +107,4 @@ func (v Uint64) At(idx int) uint64 {
 	return binary.LittleEndian.Uint64(v.xvaluebody[idx*8:])
 }
 
-func AsUint64(v XValue) uint64              { return v.(Uint64).At(0) }
 func DecodeUint64(xvaluebody []byte) Uint64 { return Uint64{xvaluebody: xvaluebody} }

@@ -30,7 +30,6 @@ func (v Float32) At(idx int) float32 {
 	return math.Float32frombits(binary.LittleEndian.Uint32(v.xvaluebody[idx*4:]))
 }
 
-func AsFloat32(v XValue) float32              { return v.(Float32).At(0) }
 func DecodeFloat32(xvaluebody []byte) Float32 { return Float32{xvaluebody: xvaluebody} }
 
 // ── Float64 ──────────────────────────────────────────────────────────────
@@ -57,5 +56,4 @@ func (v Float64) At(idx int) float64 {
 	return math.Float64frombits(binary.LittleEndian.Uint64(v.xvaluebody[idx*8:]))
 }
 
-func AsFloat64(v XValue) float64              { return v.(Float64).At(0) }
 func DecodeFloat64(xvaluebody []byte) Float64 { return Float64{xvaluebody: xvaluebody} }
