@@ -5,7 +5,7 @@ import "errors"
 const (
 	PathSep        = "/"    // 路径分隔符
 	DirIndexSuf    = "/"    // 目录索引键后缀（尾斜杠 = 目录，必须以 / 开头的 key 保证不冲突）
-	ReservedPrefix = "."    // 引擎保留字段前缀，List 时隐藏
+	RuntimeMemberSep = "‥"    // 运行时保留字段前缀（U+2025）——‥ 的唯一定义处，List 时隐藏
 	IndexValueSep= "\n"    // index XValue 中的路径分隔符
 	ExtIndexHead = "…" // extindex XValue bytes 首元素前缀，如 …/lib/init/
 )
