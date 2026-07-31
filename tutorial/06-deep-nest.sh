@@ -2,18 +2,18 @@
 # expected:
 # === deep tree ===
 # /deep/a/b/c/d/e/f	int64:6
-# a/	index	b/
+# a/	index	(1)
 # /deep/a/b/c	int64:3
-# d/	index	e/
-# c/	index	d/
-# c/	int64	3
+# d/	index	(1)
+# c/	index	(1)
+# c/
 # === deltree mid ===
 # /deep/a/b/c/d/e/f	(nil)
 # /deep/a/b/c/d/e	(nil)
 # /deep/a/b/c	int64:3
 # === deltree leaf ===
 # /deep/a/b/c	(nil)
-# a/	index	
+# a/	index	(0)
 # /end
 
 set -e
