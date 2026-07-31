@@ -172,22 +172,19 @@ func plainRepr(v XValue) string {
 		return v.RwfuncSig()
 	case KindIndex:
 		children := DecodeIndex(v)
-		if len(children) == 0 {
+		if len(children) == 1 && children[0] == "" {
 			return "(empty)"
 		}
-		if len(children) <= 2 {
-			return strings.Join(children, ", ")
-		}
-		return fmt.Sprintf("%s, … (%d)", strings.Join(children[:2], ", "), len(children))
+		return fmt.Sprintf("(%d)", len(children))
 	case KindExtIndex:
 		childs, extpath := DecodeExtIndex(v)
 		if extpath != "" {
-			return extpath
+			return fmt.Sprintf("(%d) …%s", len(childs), extpath)
 		}
 		if len(childs) == 0 {
 			return "(empty ext)"
 		}
-		return fmt.Sprintf("… (%d local)", len(childs))
+		return fmt.Sprintf("(%d)", len(childs))
 	default:
 		return string(v.raw)
 	}

@@ -90,6 +90,7 @@ func FprintList(w io.Writer, kv KVSpace, prefix string, showExt, showKind bool) 
 		key := c
 		if hasDir {
 			key += "/"
+			v = XValue{} // 目录不展示内部 index 细节
 		}
 		if v.IsNone() {
 			fmt.Fprintf(w, "%s\n", key)
