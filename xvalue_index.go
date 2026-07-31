@@ -2,45 +2,84 @@ package kvspace
 
 import "strings"
 
-// ── index  ───────────────────────────────────────────────────────────
+// ── Index ────────────────────────────────────────────────────────────────
 
-func NewIndexValue(target []string) XValue {
-	return Raw(KindIndex, []byte(strings.Join(target, IndexValueSep)))
-}
-func DecodeIndex(v XValue) []string {
-	if v.Kind() != KindIndex { return nil }
-	return strings.Split(string(v.RawBytes()), IndexValueSep)
-}
-// --link
-// NewLinkValue 返回 link XValue：kind="link", raw=target 路径。
-func NewLinkValue(target string) XValue {
-	return Raw(KindLinkIndex, []byte(target))
-}
-// DecodeLink 从 link XValue 提取目标路径。非 link kind 返回空串。
-func DecodeLink(v XValue) string {
-	if v.Kind() != KindLinkIndex { return "" }
-	return string(v.RawBytes())
+type Index struct{ xvaluebody []byte }
+
+func NewIndex(children []string) Index {
+	return Index{xvaluebody: []byte(strings.Join(children, IndexValueSep))}
 }
 
-// NewExtIndexValue 返回 extindex XValue：kind="extindex"。
-// bytes 格式：=extpath\nchild1\nchild2...
-func NewExtIndexValue(childs []string, extpath string) XValue {
-	values := append([]string{ExtIndexHead + extpath}, childs...)
-	return Raw(KindExtIndex, []byte(strings.Join(values, IndexValueSep)))
+func (v Index) Kind() string    { return KindIndex }
+func (v Index) ByteLen() int32  { return int32(len(v.xvaluebody)) }
+func (v Index) ArrayLen() int32 { return 1 }
+func (v Index) Encode() []byte  { return TLVEncode(KindIndex, v.xvaluebody, 1) }
+
+func (v Index) Children() []string {
+	s := string(v.xvaluebody)
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, IndexValueSep)
 }
 
-// DecodeExtIndex 从 extindex XValue 提取子成员列表和扩展路径。
-// 非 extindex kind 返回 nil, ""。
-func DecodeExtIndex(v XValue) (childs []string, extpath string) {
-	if v.Kind() != KindExtIndex { return nil, "" }
-	parts := strings.SplitN(string(v.RawBytes()), IndexValueSep, 2)
-	if len(parts) == 0 { return nil, "" }
+func DecodeIndex(xvaluebody []byte) Index { return Index{xvaluebody: xvaluebody} }
+
+// ── LinkIndex ────────────────────────────────────────────────────────────
+
+type LinkIndex struct{ xvaluebody []byte }
+
+func NewLinkIndex(target string) LinkIndex { return LinkIndex{xvaluebody: []byte(target)} }
+
+func (v LinkIndex) Kind() string    { return KindLinkIndex }
+func (v LinkIndex) ByteLen() int32  { return int32(len(v.xvaluebody)) }
+func (v LinkIndex) ArrayLen() int32 { return 1 }
+func (v LinkIndex) Encode() []byte  { return TLVEncode(KindLinkIndex, v.xvaluebody, 1) }
+
+func (v LinkIndex) Target() string { return string(v.xvaluebody) }
+
+func DecodeLinkIndex(xvaluebody []byte) LinkIndex { return LinkIndex{xvaluebody: xvaluebody} }
+
+// ── ExtIndex ─────────────────────────────────────────────────────────────
+
+type ExtIndex struct{ xvaluebody []byte }
+
+func NewExtIndex(children []string, extpath string) ExtIndex {
+	parts := append([]string{ExtIndexHead + extpath}, children...)
+	return ExtIndex{xvaluebody: []byte(strings.Join(parts, IndexValueSep))}
+}
+
+func (v ExtIndex) Kind() string    { return KindExtIndex }
+func (v ExtIndex) ByteLen() int32  { return int32(len(v.xvaluebody)) }
+func (v ExtIndex) ArrayLen() int32 { return 1 }
+func (v ExtIndex) Encode() []byte  { return TLVEncode(KindExtIndex, v.xvaluebody, 1) }
+
+func (v ExtIndex) Children() []string {
+	_, children := decodeExtIndexRaw(v.xvaluebody)
+	return children
+}
+
+func (v ExtIndex) ExtPath() string {
+	extpath, _ := decodeExtIndexRaw(v.xvaluebody)
+	return extpath
+}
+
+func DecodeExtIndex(xvaluebody []byte) ExtIndex { return ExtIndex{xvaluebody: xvaluebody} }
+
+// ── helpers ──────────────────────────────────────────────────────────────
+
+func decodeExtIndexRaw(xvaluebody []byte) (extpath string, children []string) {
+	s := string(xvaluebody)
+	if s == "" {
+		return "", nil
+	}
+	parts := strings.SplitN(s, IndexValueSep, 2)
+	if len(parts) == 0 {
+		return "", nil
+	}
 	extpath = strings.TrimPrefix(parts[0], ExtIndexHead)
 	if len(parts) > 1 {
-		childs = strings.Split(parts[1], IndexValueSep)
+		children = strings.Split(parts[1], IndexValueSep)
 	}
 	return
 }
-
-// HasExtRef 判定 XValue 是否持有 extindex 引用（link 或 extindex）。
-func HasExtRef(v XValue) bool { return v.Kind() == KindLinkIndex || v.Kind() == KindExtIndex }

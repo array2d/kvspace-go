@@ -1,23 +1,51 @@
 package kvspace
 
-// ── 字符串 ────────────────────────────────────────────────────────────────
+import "fmt"
 
-func String(v string) XValue { return XValue{kind: KindString, arraylength: 1, raw: []byte(v)} }
+// ── Bytes ────────────────────────────────────────────────────────────────
 
-func (v XValue) Str() string {
-	if v.kind != KindString { return "" }
-	return string(v.raw)
+type Bytes struct{ xvaluebody []byte }
+
+func NewBytes(v ...[]byte) Bytes {
+	var raw []byte
+	for _, b := range v {
+		raw = append(raw, b...)
+		raw = append(raw, 0) // null-delimited
+	}
+	return Bytes{xvaluebody: raw}
 }
 
-// ── 字节数组 ──────────────────────────────────────────────────────────────
+func (v Bytes) Kind() string   { return KindBytes }
+func (v Bytes) ByteLen() int32 { return int32(len(v.xvaluebody)) }
+func (v Bytes) ArrayLen() int32 {
+	c := 0
+	for _, b := range v.xvaluebody {
+		if b == 0 {
+			c++
+		}
+	}
+	if c == 0 && len(v.xvaluebody) > 0 {
+		return 1
+	}
+	return int32(c)
+}
+func (v Bytes) Encode() []byte { return TLVEncode(KindBytes, v.xvaluebody, v.ArrayLen()) }
 
-func Bytes(v []byte) XValue {
-	c := make([]byte, len(v))
-	copy(c, v)
-	return XValue{kind: KindBytes, arraylength: 1, raw: c}
+func (v Bytes) At(idx int) []byte {
+	start, end := 0, 0
+	for i := 0; i <= idx; i++ {
+		start = end
+		pos := start
+		for pos < len(v.xvaluebody) && v.xvaluebody[pos] != 0 {
+			pos++
+		}
+		end = pos + 1
+		if pos >= len(v.xvaluebody) {
+			panic(fmt.Sprintf("Bytes.At: index %d out of range [0,%d)", idx, i))
+		}
+	}
+	return v.xvaluebody[start : end-1]
 }
 
-func (v XValue) Bytes() []byte {
-	if v.kind != KindBytes { return nil }
-	return v.raw
-}
+func AsBytes(v XValue) []byte             { return v.(Bytes).At(0) }
+func DecodeBytes(xvaluebody []byte) Bytes { return Bytes{xvaluebody: xvaluebody} }
