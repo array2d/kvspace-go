@@ -1,8 +1,9 @@
 #!/bin/bash
 # expected:
 # === tree shows extindex with dir+file ===
-# /ext
-# ├── d/	val
+# /ext/
+# ├── d	val
+# ├── d/
 # │   └── y	2
 # └── k	1
 # /end

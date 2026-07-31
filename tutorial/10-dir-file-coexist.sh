@@ -2,7 +2,8 @@
 # expected:
 # === tree shows dir and file ===
 # /
-# └── b/	value
+# ├── b	value
+# └── b/
 #     └── x	1
 # /end
 

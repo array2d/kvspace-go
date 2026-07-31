@@ -1,16 +1,16 @@
 #!/bin/bash
 # expected:
 # === tree showext true ===
-# /ext
-# ├── z	42
+# /ext/
+# ├── a	1
 # ├── x/
 # │   └── z	99
-# └── a	1
+# └── z	42
 # === tree showext false ===
-# /ext
-# ├── z	42
-# └── x/
-#     └── z	99
+# /ext/
+# ├── x/
+# │   └── z	99
+# └── z	42
 # └── …/base/
 # /end
 
