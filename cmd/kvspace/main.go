@@ -12,7 +12,9 @@ import (
 )
 
 func defaultKVSpace() string {
-	if v := os.Getenv("KVLANG_KVSPACE"); v != "" { return v }
+	if v := os.Getenv("KVLANG_KVSPACE"); v != "" {
+		return v
+	}
 	return "redis://127.0.0.1:6379"
 }
 
@@ -27,7 +29,10 @@ func main() {
 	fs.Parse(os.Args[1:])
 
 	sub := fs.Args()
-	if len(sub) == 0 { fs.Usage(); os.Exit(1) }
+	if len(sub) == 0 {
+		fs.Usage()
+		os.Exit(1)
+	}
 
 	kv := kvspace.Conn(*dsn)
 	defer kv.DisConn()
@@ -40,34 +45,70 @@ func main() {
 
 	switch sub[0] {
 	case "get":
-		if len(sub) < 2 { exitUsage("kvspace get <key1> [key2 ...]") }
+		if len(sub) < 2 {
+			exitUsage("kvspace get <key1> [key2 ...]")
+		}
 		for _, k := range sub[1:] {
 			v := kvspace.GetOne(kv, k)
-			if v.IsNone() { fmt.Printf("%s\t(nil)\n", k) } else { fmt.Printf("%s\t%s\n", k, v) }
+			if kvspace.IsNone(v) {
+				fmt.Printf("%s\t(nil)\n", k)
+			} else {
+				fmt.Printf("%s\t%s\n", k, kvspace.Format(v))
+			}
 		}
 	case "set":
-		if len(sub) < 3 { exitUsage("kvspace set <key> <value>") }
+		if len(sub) < 3 {
+			exitUsage("kvspace set <key> <value>")
+		}
 		v, err := kvspace.ParseValue(sub[2])
-		if err != nil { fatalf("%v", err) }
-		if err := kv.Set([]kvspace.KVPair{{Key: sub[1], Val: v}}); err != nil { fatalf("%v", err) }
+		if err != nil {
+			fatalf("%v", err)
+		}
+		if err := kv.Set([]kvspace.KVPair{{Key: sub[1], Val: v}}); err != nil {
+			fatalf("%v", err)
+		}
 	case "del":
-		if len(sub) < 2 { exitUsage("kvspace del <key1> [key2 ...]") }
-		if err := kv.Del(sub[1:]...); err != nil { fatalf("%v", err) }
+		if len(sub) < 2 {
+			exitUsage("kvspace del <key1> [key2 ...]")
+		}
+		if err := kv.Del(sub[1:]...); err != nil {
+			fatalf("%v", err)
+		}
 	case "deltree":
-		if len(sub) < 2 { exitUsage("kvspace deltree <prefix>") }
-		if err := kv.DelTree(sub[1]); err != nil { fatalf("%v", err) }
+		if len(sub) < 2 {
+			exitUsage("kvspace deltree <prefix>")
+		}
+		if err := kv.DelTree(sub[1]); err != nil {
+			fatalf("%v", err)
+		}
 	case "mkindex":
-		if len(sub) < 2 { exitUsage("kvspace mkindex <path>") }
-		if err := kv.Mkindex(sub[1]); err != nil { fatalf("%v", err) }
+		if len(sub) < 2 {
+			exitUsage("kvspace mkindex <path>")
+		}
+		if err := kv.Mkindex(sub[1]); err != nil {
+			fatalf("%v", err)
+		}
 	case "link":
-		if len(sub) < 3 { exitUsage("kvspace link <target> <linkpath>") }
-		if err := kv.Link(sub[1], sub[2]); err != nil { fatalf("%v", err) }
+		if len(sub) < 3 {
+			exitUsage("kvspace link <target> <linkpath>")
+		}
+		if err := kv.Link(sub[1], sub[2]); err != nil {
+			fatalf("%v", err)
+		}
 	case "unlink":
-		if len(sub) < 2 { exitUsage("kvspace unlink <path>") }
-		if err := kv.UnLink(sub[1]); err != nil { fatalf("%v", err) }
+		if len(sub) < 2 {
+			exitUsage("kvspace unlink <path>")
+		}
+		if err := kv.UnLink(sub[1]); err != nil {
+			fatalf("%v", err)
+		}
 	case "extindex":
-		if len(sub) < 3 { exitUsage("kvspace extindex <path> <extpath>") }
-		if err := kv.ExtIndex(sub[1], sub[2]); err != nil { fatalf("%v", err) }
+		if len(sub) < 3 {
+			exitUsage("kvspace extindex <path> <extpath>")
+		}
+		if err := kv.ExtIndex(sub[1], sub[2]); err != nil {
+			fatalf("%v", err)
+		}
 	case "list", "ls":
 		cmdList(kv, sub[1:])
 	case "array2d":
@@ -75,26 +116,37 @@ func main() {
 	case "tree":
 		cmdTree(kv, sub[1:])
 	case "dump":
-		if len(sub) < 2 { exitUsage("kvspace dump <prefix>") }
+		if len(sub) < 2 {
+			exitUsage("kvspace dump <prefix>")
+		}
 		kvspace.Walk(kv, sub[1], func(path string, v kvspace.XValue) {
-			short := strings.ReplaceAll(v.String(), "\n", "↵")
-			if len(short) > 80 { short = short[:80] + "…" }
+			short := strings.ReplaceAll(kvspace.Format(v), "\n", "↵")
+			if len(short) > 80 {
+				short = short[:80] + "…"
+			}
 			fmt.Printf("%-60s %s\n", path, short)
 		})
 	case "watch":
 		cmdWatch(kv, sub[1:])
 	case "notify":
-		if len(sub) < 3 { exitUsage("kvspace notify <key> <value>") }
-		if err := kv.Notify(sub[1], kvspace.String(sub[2])); err != nil { fatalf("%v", err) }
+		if len(sub) < 3 {
+			exitUsage("kvspace notify <key> <value>")
+		}
+		if err := kv.Notify(sub[1], kvspace.NewChar(sub[2])); err != nil {
+			fatalf("%v", err)
+		}
 	case "clear":
-		if err := kv.Clear(); err != nil { fatalf("%v", err) }
+		if err := kv.Clear(); err != nil {
+			fatalf("%v", err)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n\n", sub[0])
-		fs.Usage(); os.Exit(1)
+		fs.Usage()
+		os.Exit(1)
 	}
 }
 
-func exitUsage(msg string)    { fmt.Fprintln(os.Stderr, "usage:", msg); os.Exit(1) }
+func exitUsage(msg string)      { fmt.Fprintln(os.Stderr, "usage:", msg); os.Exit(1) }
 func fatalf(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...); os.Exit(1) }
 
 func cmdList(kv kvspace.KVSpace, args []string) {
@@ -106,7 +158,10 @@ func cmdList(kv kvspace.KVSpace, args []string) {
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
-	if fs.NArg() == 0 { fs.Usage(); os.Exit(1) }
+	if fs.NArg() == 0 {
+		fs.Usage()
+		os.Exit(1)
+	}
 	kvspace.FprintList(os.Stdout, kv, fs.Arg(0), *showExt, *showKind)
 }
 
@@ -118,7 +173,10 @@ func cmdWatch(kv kvspace.KVSpace, args []string) {
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
-	if fs.NArg() == 0 { fs.Usage(); os.Exit(1) }
+	if fs.NArg() == 0 {
+		fs.Usage()
+		os.Exit(1)
+	}
 	fmt.Println(kv.Watch(fs.Arg(0), *timeout))
 }
 
@@ -131,7 +189,10 @@ func cmdTree(kv kvspace.KVSpace, args []string) {
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
-	if fs.NArg() == 0 { fs.Usage(); os.Exit(1) }
+	if fs.NArg() == 0 {
+		fs.Usage()
+		os.Exit(1)
+	}
 	p := fs.Arg(0)
 	fmt.Println(p)
 	kvspace.FprintTree(os.Stdout, kv, p, "", *showExt, *showKind)
@@ -146,6 +207,9 @@ func cmdArray2D(kv kvspace.KVSpace, args []string) {
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
-	if fs.NArg() == 0 { fs.Usage(); os.Exit(1) }
+	if fs.NArg() == 0 {
+		fs.Usage()
+		os.Exit(1)
+	}
 	kvspace.FprintArray2D(os.Stdout, kv, fs.Arg(0), *showExt, *showKind)
 }

@@ -13,37 +13,39 @@ import (
 func ParseValue(raw string) (XValue, error) {
 	idx := strings.Index(raw, ":")
 	if idx < 0 {
-		return String(raw), nil
+		return NewChar(raw), nil
 	}
 	kind, repr := raw[:idx], raw[idx+1:]
 	switch kind {
 	case "int":
 		i, err := strconv.ParseInt(repr, 10, 64)
 		if err != nil {
-			return XValue{}, fmt.Errorf("invalid int: %q", repr)
+			return nil, fmt.Errorf("invalid int: %q", repr)
 		}
-		return Int64(i), nil
+		return NewInt64(i), nil
 	case "float":
 		f, err := strconv.ParseFloat(repr, 64)
 		if err != nil {
-			return XValue{}, fmt.Errorf("invalid float: %q", repr)
+			return nil, fmt.Errorf("invalid float: %q", repr)
 		}
-		return Float64(f), nil
+		return NewFloat64(f), nil
 	case "bool":
 		switch repr {
 		case "true":
-			return Bool(true), nil
+			return NewBool(true), nil
 		case "false":
-			return Bool(false), nil
+			return NewBool(false), nil
 		default:
-			return XValue{}, fmt.Errorf("invalid bool: %q", repr)
+			return nil, fmt.Errorf("invalid bool: %q", repr)
 		}
 	case "string":
-		return String(repr), nil
+		return NewChar(repr), nil
 	case "nil":
-		return XValue{}, nil
+		return None{}, nil
+	case KindIndex:
+		return NewIndex(nil), nil
 	default:
-		return Raw(kind, []byte(repr)), nil
+		return nil, fmt.Errorf("unknown kind: %q", kind)
 	}
 }
 
@@ -51,15 +53,10 @@ func ParseValue(raw string) (XValue, error) {
 
 func ReadPrefixExt(kv KVSpace, prefix string) string {
 	v := GetOne(kv, prefix)
-	_, extpath := DecodeExtIndex(v)
-	return extpath
-}
-
-func ListDirExt(kv KVSpace, prefix string) []string {
-	if ext := ReadPrefixExt(kv, prefix); ext != "" {
-		return []string{ExtIndexHead + ext}
+	if ei, ok := v.(ExtIndex); ok {
+		return ei.ExtPath()
 	}
-	return nil
+	return ""
 }
 
 func StripExtChildren(kv KVSpace, prefix string, children []string) []string {
@@ -84,20 +81,20 @@ func FprintList(w io.Writer, kv KVSpace, prefix string, showExt, showKind bool) 
 		hasDir := len(kv.List(childDir, false)) > 0
 		if !hasDir {
 			dirV := GetAt(kv, prefix, c+DirIndexSuf)
-			hasDir = !dirV.IsNone()
+			hasDir = !IsNone(dirV)
 		}
 
 		key := c
 		if hasDir {
 			key += "/"
-			v = XValue{} // 目录不展示内部 index 细节
+			v = None{} // 目录不展示内部 index 细节
 		}
-		if v.IsNone() {
+		if IsNone(v) {
 			fmt.Fprintf(w, "%s\n", key)
 		} else if showKind {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", key, v.Kind(), v.Plain())
+			fmt.Fprintf(w, "%s\t%s\t%s\n", key, v.Kind(), Plain(v))
 		} else {
-			fmt.Fprintf(w, "%s\t%s\n", key, v.Plain())
+			fmt.Fprintf(w, "%s\t%s\n", key, Plain(v))
 		}
 	}
 	if !showExt {
@@ -123,7 +120,11 @@ func FprintArray2D(w io.Writer, kv KVSpace, prefix string, showExt, showKind boo
 		children = StripExtChildren(kv, prefix, children)
 	}
 
-	type slot struct{ s0, s1 int; name string; val XValue }
+	type slot struct {
+		s0, s1 int
+		name   string
+		val    XValue
+	}
 	twoD := map[int][]slot{}
 	var regular []string
 
@@ -139,32 +140,48 @@ func FprintArray2D(w io.Writer, kv KVSpace, prefix string, showExt, showKind boo
 
 	// 打印折叠后的二维行（按 s0 升序）
 	s0keys := make([]int, 0, len(twoD))
-	for k := range twoD { s0keys = append(s0keys, k) }
+	for k := range twoD {
+		s0keys = append(s0keys, k)
+	}
 	sort.Ints(s0keys)
 
 	for _, s0 := range s0keys {
 		slots := twoD[s0]
 		sort.Slice(slots, func(i, j int) bool {
 			a, b := slots[i].s1, slots[j].s1
-			if a < 0 && b < 0 { return a > b }
-			if a < 0 { return true }
-			if b < 0 { return false }
-			if a == 0 { return true }
-			if b == 0 { return false }
+			if a < 0 && b < 0 {
+				return a > b
+			}
+			if a < 0 {
+				return true
+			}
+			if b < 0 {
+				return false
+			}
+			if a == 0 {
+				return true
+			}
+			if b == 0 {
+				return false
+			}
 			return a < b
 		})
 		minS1, maxS1 := slots[0].s1, slots[0].s1
 		for _, s := range slots {
-			if s.s1 < minS1 { minS1 = s.s1 }
-			if s.s1 > maxS1 { maxS1 = s.s1 }
+			if s.s1 < minS1 {
+				minS1 = s.s1
+			}
+			if s.s1 > maxS1 {
+				maxS1 = s.s1
+			}
 		}
 
 		fmt.Fprintf(w, "[%d,%d~%d]", s0, minS1, maxS1)
 		for _, s := range slots {
 			if showKind {
-				fmt.Fprintf(w, "\t%s:%s", s.val.Kind(), s.val.Plain())
+				fmt.Fprintf(w, "\t%s:%s", s.val.Kind(), Plain(s.val))
 			} else {
-				fmt.Fprintf(w, "\t%s", s.val.Plain())
+				fmt.Fprintf(w, "\t%s", Plain(s.val))
 			}
 		}
 		fmt.Fprintln(w)
@@ -177,16 +194,18 @@ func FprintArray2D(w io.Writer, kv KVSpace, prefix string, showExt, showKind boo
 		hasDir := len(kv.List(childDir, false)) > 0
 		if !hasDir {
 			dirV := GetAt(kv, prefix, c+DirIndexSuf)
-			hasDir = !dirV.IsNone()
+			hasDir = !IsNone(dirV)
 		}
 		key := c
-		if hasDir { key += "/" }
-		if v.IsNone() {
+		if hasDir {
+			key += "/"
+		}
+		if IsNone(v) {
 			fmt.Fprintf(w, "%s\n", key)
 		} else if showKind {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", key, v.Kind(), v.Plain())
+			fmt.Fprintf(w, "%s\t%s\t%s\n", key, v.Kind(), Plain(v))
 		} else {
-			fmt.Fprintf(w, "%s\t%s\n", key, v.Plain())
+			fmt.Fprintf(w, "%s\t%s\n", key, Plain(v))
 		}
 	}
 
@@ -212,19 +231,22 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 	}
 
 	type entry struct {
-		is2D    bool
-		name    string
-		val     XValue
+		is2D     bool
+		name     string
+		val      XValue
 		childDir string
-		s0      int
-		slots   []struct {
+		s0       int
+		slots    []struct {
 			s1  int
 			val XValue
 		}
 	}
 
 	// group [s0,s1] by s0, regular as-is
-	type slot struct{ s0, s1 int; val XValue }
+	type slot struct {
+		s0, s1 int
+		val    XValue
+	}
 	twoD := map[int][]slot{}
 	var ordered []entry
 
@@ -240,7 +262,9 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 
 	// insert 2D rows before first regular entry (same as array2d order)
 	s0keys := make([]int, 0, len(twoD))
-	for k := range twoD { s0keys = append(s0keys, k) }
+	for k := range twoD {
+		s0keys = append(s0keys, k)
+	}
 	sort.Ints(s0keys)
 
 	twoDEntries := make([]entry, 0, len(s0keys))
@@ -248,15 +272,33 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 		slots := twoD[s0]
 		sort.Slice(slots, func(i, j int) bool {
 			a, b := slots[i].s1, slots[j].s1
-			if a < 0 && b < 0 { return a > b }
-			if a < 0 { return true }
-			if b < 0 { return false }
-			if a == 0 { return true }
-			if b == 0 { return false }
+			if a < 0 && b < 0 {
+				return a > b
+			}
+			if a < 0 {
+				return true
+			}
+			if b < 0 {
+				return false
+			}
+			if a == 0 {
+				return true
+			}
+			if b == 0 {
+				return false
+			}
 			return a < b
 		})
-		conv := make([]struct{ s1 int; val XValue }, len(slots))
-		for i, s := range slots { conv[i] = struct{ s1 int; val XValue }{s.s1, s.val} }
+		conv := make([]struct {
+			s1  int
+			val XValue
+		}, len(slots))
+		for i, s := range slots {
+			conv[i] = struct {
+				s1  int
+				val XValue
+			}{s.s1, s.val}
+		}
 		twoDEntries = append(twoDEntries, entry{is2D: true, s0: s0, slots: conv})
 	}
 
@@ -264,11 +306,15 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 	ordered = append(twoDEntries, ordered...)
 
 	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].is2D != ordered[j].is2D { return ordered[i].is2D }
+		if ordered[i].is2D != ordered[j].is2D {
+			return ordered[i].is2D
+		}
 		a, b := ordered[i].name, ordered[j].name
 		// 同名时非目录在前（"main" 在 "main/" 之前）
 		as, bs := strings.TrimSuffix(a, DirIndexSuf), strings.TrimSuffix(b, DirIndexSuf)
-		if as == bs { return !strings.HasSuffix(a, DirIndexSuf) }
+		if as == bs {
+			return !strings.HasSuffix(a, DirIndexSuf)
+		}
 		return as < bs
 	})
 
@@ -282,7 +328,7 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 		childDir := JoinPath(prefix, strings.TrimSuffix(c, DirIndexSuf)) + DirIndexSuf
 		if len(kv.List(childDir, false)) > 0 {
 			ordered[i].childDir = childDir
-		} else if dirV := GetAt(kv, prefix, strings.TrimSuffix(c, DirIndexSuf)+DirIndexSuf); !dirV.IsNone() {
+		} else if dirV := GetAt(kv, prefix, strings.TrimSuffix(c, DirIndexSuf)+DirIndexSuf); !IsNone(dirV) {
 			ordered[i].childDir = childDir
 		}
 	}
@@ -299,16 +345,20 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 		if e.is2D {
 			slots := e.slots
 			minS1, maxS1 := slots[0].s1, slots[0].s1
-				for _, s := range slots {
-					if s.s1 < minS1 { minS1 = s.s1 }
-					if s.s1 > maxS1 { maxS1 = s.s1 }
+			for _, s := range slots {
+				if s.s1 < minS1 {
+					minS1 = s.s1
 				}
+				if s.s1 > maxS1 {
+					maxS1 = s.s1
+				}
+			}
 			fmt.Fprintf(w, "%s%s[%d,%d~%d]", indent, branch, e.s0, minS1, maxS1)
 			for _, s := range slots {
 				if showKind {
-					fmt.Fprintf(w, "\t%s:%s", s.val.Kind(), s.val.Plain())
+					fmt.Fprintf(w, "\t%s:%s", s.val.Kind(), Plain(s.val))
 				} else {
-					fmt.Fprintf(w, "\t%s", s.val.Plain())
+					fmt.Fprintf(w, "\t%s", Plain(s.val))
 				}
 			}
 			fmt.Fprintln(w)
@@ -318,12 +368,12 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 				fmt.Fprintf(w, "%s%s%s\n", indent, branch, key)
 				FprintTree(w, kv, e.childDir, nextIndent, showExt, showKind)
 			} else {
-				if e.val.IsNone() {
+				if IsNone(e.val) {
 					fmt.Fprintf(w, "%s%s%s\n", indent, branch, key)
 				} else if showKind {
-					fmt.Fprintf(w, "%s%s%s\t%s\t%s\n", indent, branch, key, e.val.Kind(), e.val.Plain())
+					fmt.Fprintf(w, "%s%s%s\t%s\t%s\n", indent, branch, key, e.val.Kind(), Plain(e.val))
 				} else {
-					fmt.Fprintf(w, "%s%s%s\t%s\n", indent, branch, key, e.val.Plain())
+					fmt.Fprintf(w, "%s%s%s\t%s\n", indent, branch, key, Plain(e.val))
 				}
 			}
 		}
@@ -373,20 +423,26 @@ func MkIndexRecursive(kv KVSpace, path string) {
 	}
 	for i := 1; i < len(path); {
 		j := strings.IndexByte(path[i:], '/')
-		if j < 0 { break }
+		if j < 0 {
+			break
+		}
 		i += j + 1
 		dir := path[:i]
 		p, n := SepPath(dir[:len(dir)-1])
-		if p != PathSep { p += DirIndexSuf }
+		if p != PathSep {
+			p += DirIndexSuf
+		}
 		if !dirExists(kv, p, n) {
-			kv.Set([]KVPair{{dir, Raw(KindIndex, nil)}})
+			kv.Set([]KVPair{{dir, NewIndex(nil)}})
 		}
 	}
 }
 
 func dirExists(kv KVSpace, parentDir, name string) bool {
 	for _, m := range kv.List(parentDir, false) {
-		if m == name || m == name+DirIndexSuf { return true }
+		if m == name || m == name+DirIndexSuf {
+			return true
+		}
 	}
 	return false
 }
@@ -394,7 +450,9 @@ func dirExists(kv KVSpace, parentDir, name string) bool {
 // GetOne 读取单个 key 的便捷方法。
 func GetOne(kv KVSpace, key string) XValue {
 	p, l := SepPath(key)
-	if p != PathSep { p += DirIndexSuf }
+	if p != PathSep {
+		p += DirIndexSuf
+	}
 	return kv.Get(p, []string{l})[0]
 }
 
@@ -409,7 +467,7 @@ func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
 			p += DirIndexSuf
 		}
 		vals := kv.Get(p, []string{l})
-		if len(vals) > 0 && !vals[0].IsNone() {
+		if len(vals) > 0 && !IsNone(vals[0]) {
 			fn(clean, vals[0])
 		}
 	}
