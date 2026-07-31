@@ -110,9 +110,9 @@ func (r *redisImpl) resolveOne(ctx context.Context, path string) (string, bool) 
 		if err != nil {
 			panic(fmt.Errorf("%w: %s err=%v", kvspace.ErrResolve, cur, err))
 		}
-		v := kvspace.DecodeXValue(data)
-		if v.Kind() == kvspace.KindLinkIndex {
-			target := string(v.RawBytes())
+		v := kvspace.DecodeXValueHead(data).Decode()
+		if li, ok := v.(kvspace.LinkIndex); ok {
+			target := li.Target()
 			if i+1 < len(parts) {
 				return kvspace.JoinPath(target, strings.Join(parts[i+1:], kvspace.PathSep)), true
 			}
@@ -121,20 +121,6 @@ func (r *redisImpl) resolveOne(ctx context.Context, path string) (string, bool) 
 	}
 	return path, false
 }
-
-func (r *redisImpl) extIndex(ctx context.Context, dir string) (values []string, extpath string) {
-	if !isDir(dir) {
-		panic(kvspace.ErrDirMustEndWithSlash)
-	}
-	data, err := r.rdb.Get(ctx, dir).Bytes()
-	if err != nil {
-		if err == goredis.Nil { return nil, "" }
-		panic(fmt.Errorf("%w: extIndex %s err=%v", kvspace.ErrGet, dir, err))
-	}
-	values, extpath = kvspace.DecodeExtIndex(kvspace.DecodeXValue(data))
-	return
-}
-
 
 func (r *redisImpl) collectKeys(ctx context.Context, prefix string) []string {
 	pattern := prefix + "*"

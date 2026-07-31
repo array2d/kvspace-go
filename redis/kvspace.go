@@ -15,13 +15,17 @@ import (
 func (r *redisImpl) getExtTarget(ctx context.Context, key string) string {
 	data, err := r.rdb.Get(ctx, key).Bytes()
 	if err != nil {
-		if err == goredis.Nil { return "" }
+		if err == goredis.Nil {
+			return ""
+		}
 		panic(fmt.Errorf("%w: getExtTarget key=%s err=%v", kvspace.ErrGet, key, err))
 	}
-	v := kvspace.DecodeXValue(data)
-	if v.Kind() == kvspace.KindExtIndex {
-		_, extT := kvspace.DecodeExtIndex(v)
-		return extT
+	head := kvspace.DecodeXValueHead(data)
+	if head.Kind == kvspace.KindExtIndex {
+		return kvspace.DecodeExtIndex(head.Raw).ExtPath()
+	}
+	if head.Kind != "" {
+		panic(fmt.Errorf("getExtTarget: expected extindex, got %s", head.Kind))
 	}
 	return ""
 }
@@ -32,7 +36,14 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 	ctx := bg
 	assertDir(prefix)
 	prefix = r.resolvePath(ctx, prefix)
-	extT := r.getExtTarget(ctx, prefix)
+
+	var extT string
+	if data, err := r.rdb.Get(ctx, prefix).Bytes(); err == nil {
+		head := kvspace.DecodeXValueHead(data)
+		if head.Kind == kvspace.KindExtIndex {
+			extT = kvspace.DecodeExtIndex(head.Raw).ExtPath()
+		}
+	}
 
 	results := make([]kvspace.XValue, len(keys))
 	for i, k := range keys {
@@ -45,7 +56,7 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 
 		data, err := r.rdb.Get(ctx, full).Bytes()
 		if err == nil {
-			results[i] = kvspace.DecodeXValue(data)
+			results[i] = kvspace.DecodeXValueHead(data).Decode()
 			continue
 		}
 		if err != goredis.Nil {
@@ -56,14 +67,14 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 			targetKey := kvspace.JoinPath(extT, k)
 			data, err := r.rdb.Get(ctx, targetKey).Bytes()
 			if err == nil {
-				results[i] = kvspace.DecodeXValue(data)
+				results[i] = kvspace.DecodeXValueHead(data).Decode()
 				continue
 			}
 			if err != goredis.Nil {
 				panic(fmt.Errorf("%w: ext fallback key=%s err=%v", kvspace.ErrGet, targetKey, err))
 			}
 		}
-		results[i] = kvspace.None()
+		results[i] = kvspace.None{}
 	}
 	return results
 }
@@ -71,10 +82,12 @@ func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
 func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
 	data, err := r.rdb.Get(ctx, dir).Bytes()
 	if err != nil {
-		if err == goredis.Nil { return kvspace.None() }
+		if err == goredis.Nil {
+			return kvspace.None{}
+		}
 		panic(fmt.Errorf("%w: getDir %s err=%v", kvspace.ErrGet, dir, err))
 	}
-	return kvspace.DecodeXValue(data)
+	return kvspace.DecodeXValueHead(data).Decode()
 }
 
 // ── 目录 index 读写 ────────────────────────────────────────────────────────────
@@ -82,76 +95,97 @@ func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
 func (r *redisImpl) readDirIndex(ctx context.Context, dir string) []string {
 	data, err := r.rdb.Get(ctx, dir).Bytes()
 	if err != nil {
-		if err == goredis.Nil { return nil }
-		panic(fmt.Errorf("%w: readDirIndex %s err=%v", kvspace.ErrGet, dir, err))
-	}
-	v := kvspace.DecodeXValue(data)
-	switch v.Kind() {
-	case kvspace.KindIndex:
-		nodes := kvspace.DecodeIndex(v)
-		if len(nodes) == 1 && nodes[0] == "" {
+		if err == goredis.Nil {
 			return nil
 		}
-		return nodes
-	case kvspace.KindExtIndex:
-		childs, _ := kvspace.DecodeExtIndex(v)
-		return childs
+		panic(fmt.Errorf("%w: readDirIndex %s err=%v", kvspace.ErrGet, dir, err))
 	}
-	return nil
+	v := kvspace.DecodeXValueHead(data).Decode()
+	if kvspace.IsNone(v) {
+		return nil
+	}
+	switch v := v.(type) {
+	case kvspace.Index:
+		c := v.Children()
+		if len(c) == 1 && c[0] == "" {
+			return nil
+		}
+		return c
+	case kvspace.ExtIndex:
+		return v.Children()
+	default:
+		panic(fmt.Sprintf("readDirIndex: unexpected kind %s", v.Kind()))
+	}
 }
 
 func (r *redisImpl) addChild(ctx context.Context, pipe goredis.Pipeliner, parent, name string) {
 	data, err := r.rdb.Get(ctx, parent).Bytes()
 	if err != nil {
 		if err == goredis.Nil {
-			pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewIndexValue([]string{name})), 0)
+			pipe.Set(ctx, parent, kvspace.NewIndex([]string{name}).Encode(), 0)
 			return
 		}
 		panic(fmt.Errorf("%w: addChild %s err=%v", kvspace.ErrGet, parent, err))
 	}
-	v := kvspace.DecodeXValue(data)
-	switch v.Kind() {
-	case kvspace.KindIndex:
-		nodes := kvspace.DecodeIndex(v)
-		if len(nodes) == 1 && nodes[0] == "" { nodes = nil }
+	v := kvspace.DecodeXValueHead(data).Decode()
+	switch v := v.(type) {
+	case kvspace.Index:
+		nodes := v.Children()
+		if len(nodes) == 1 && nodes[0] == "" {
+			nodes = nil
+		}
 		for _, n := range nodes {
-			if n == name { return }
+			if n == name {
+				return
+			}
 		}
 		nodes = append(nodes, name)
-		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewIndexValue(nodes)), 0)
-	case kvspace.KindExtIndex:
-		childs, extpath := kvspace.DecodeExtIndex(v)
-		for _, c := range childs {
-			if c == name { return }
+		pipe.Set(ctx, parent, kvspace.NewIndex(nodes).Encode(), 0)
+	case kvspace.ExtIndex:
+		for _, c := range v.Children() {
+			if c == name {
+				return
+			}
 		}
-		childs = append(childs, name)
-		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewExtIndexValue(childs, extpath)), 0)
+		childs := append(v.Children(), name)
+		pipe.Set(ctx, parent, kvspace.NewExtIndex(childs, v.ExtPath()).Encode(), 0)
+	default:
+		panic(fmt.Sprintf("addChild: unexpected kind %s", v.Kind()))
 	}
 }
 
 func (r *redisImpl) removeChild(ctx context.Context, pipe goredis.Pipeliner, parent, name string) {
 	data, err := r.rdb.Get(ctx, parent).Bytes()
 	if err != nil {
-		if err == goredis.Nil { return }
+		if err == goredis.Nil {
+			return
+		}
 		panic(fmt.Errorf("%w: removeChild %s/%s err=%v", kvspace.ErrGet, parent, name, err))
 	}
-	v := kvspace.DecodeXValue(data)
-	switch v.Kind() {
-	case kvspace.KindIndex:
-		nodes := kvspace.DecodeIndex(v)
-		if len(nodes) == 1 && nodes[0] == "" { nodes = nil }
+	v := kvspace.DecodeXValueHead(data).Decode()
+	switch v := v.(type) {
+	case kvspace.Index:
+		nodes := v.Children()
+		if len(nodes) == 1 && nodes[0] == "" {
+			nodes = nil
+		}
 		filtered := make([]string, 0, len(nodes))
 		for _, n := range nodes {
-			if n != name && n != name+kvspace.DirIndexSuf { filtered = append(filtered, n) }
+			if n != name && n != name+kvspace.DirIndexSuf {
+				filtered = append(filtered, n)
+			}
 		}
-		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewIndexValue(filtered)), 0)
-	case kvspace.KindExtIndex:
-		childs, extpath := kvspace.DecodeExtIndex(v)
-		filtered := make([]string, 0, len(childs))
-		for _, c := range childs {
-			if c != name && c != name+kvspace.DirIndexSuf { filtered = append(filtered, c) }
+		pipe.Set(ctx, parent, kvspace.NewIndex(filtered).Encode(), 0)
+	case kvspace.ExtIndex:
+		filtered := make([]string, 0, len(v.Children()))
+		for _, c := range v.Children() {
+			if c != name && c != name+kvspace.DirIndexSuf {
+				filtered = append(filtered, c)
+			}
 		}
-		pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewExtIndexValue(filtered, extpath)), 0)
+		pipe.Set(ctx, parent, kvspace.NewExtIndex(filtered, v.ExtPath()).Encode(), 0)
+	default:
+		panic(fmt.Sprintf("removeChild: unexpected kind %s", v.Kind()))
 	}
 }
 
@@ -173,7 +207,7 @@ func (r *redisImpl) Mkindex(path string) error {
 		}
 		parent, name := parentName(cur)
 		pipe := r.rdb.Pipeline()
-		r.addChild(ctx, pipe, parent, name + kvspace.DirIndexSuf)
+		r.addChild(ctx, pipe, parent, name+kvspace.DirIndexSuf)
 		if _, err := pipe.Exec(ctx); err != nil {
 			return fmt.Errorf("%w: Mkindex %s err=%v", kvspace.ErrPipeExec, cur, err)
 		}
@@ -197,44 +231,50 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 		if strings.Contains(resolved, "//") {
 			panic(fmt.Errorf("Set: double-slash in key %q", resolved))
 		}
-		k := val.Kind()
-		if (k == kvspace.KindIndex || k == kvspace.KindExtIndex) && !isDir(resolved) {
-			panic(fmt.Errorf("Set: index/extindex value at non-directory key %q", resolved))
+		switch val.(type) {
+		case kvspace.Index, kvspace.ExtIndex:
+			if !isDir(resolved) {
+				panic(fmt.Errorf("Set: index/extindex value at non-directory key %q", resolved))
+			}
 		}
 
 		if isDir(resolved) {
 			parent, name := parentName(resolved)
 			kvspace.MkIndexRecursive(r, parent)
-			pipe.Set(ctx, resolved, kvspace.EncodeXValue(val), 0)
+			pipe.Set(ctx, resolved, val.Encode(), 0)
 			children = append(children, childEntry{parent, name + kvspace.DirIndexSuf})
 		} else {
 			parent, name := parentName(resolved)
 			kvspace.MkIndexRecursive(r, parent)
 
-			if extT := r.getExtTarget(ctx, parent); extT != "" {
-				localNodes := r.readDirIndex(ctx, parent)
-				localExists := false
-				for _, n := range localNodes {
-					if n == name { localExists = true; break }
-				}
-				if !localExists {
-					extNodes := r.readDirIndex(ctx, extT)
-					for _, n := range extNodes {
+			if data, err := r.rdb.Get(ctx, parent).Bytes(); err == nil {
+				head := kvspace.DecodeXValueHead(data)
+				if head.Kind == kvspace.KindExtIndex {
+					extT := kvspace.DecodeExtIndex(head.Raw).ExtPath()
+					localNodes := r.readDirIndex(ctx, parent)
+					localExists := false
+					for _, n := range localNodes {
 						if n == name {
-							panic(fmt.Errorf("%w: %s", kvspace.ErrExtWrite, resolved))
+							localExists = true
+							break
+						}
+					}
+					if !localExists {
+						extNodes := r.readDirIndex(ctx, extT)
+						for _, n := range extNodes {
+							if n == name {
+								panic(fmt.Errorf("%w: %s", kvspace.ErrExtWrite, resolved))
+							}
 						}
 					}
 				}
 			}
 
-			pipe.Set(ctx, resolved, kvspace.EncodeXValue(val), 0)
+			pipe.Set(ctx, resolved, val.Encode(), 0)
 			children = append(children, childEntry{parent, name})
 		}
 	}
 
-	// Batch all child additions: read each parent index once, merge all pending
-	// children, then write once via pipeline. This avoids the read-after-write
-	// race where addChild reads stale data when called repeatedly in one pipeline.
 	parentChildren := make(map[string][]string, len(children))
 	for _, c := range children {
 		parentChildren[c.parent] = append(parentChildren[c.parent], c.name)
@@ -248,14 +288,19 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 		var extpath string
 		isExt := false
 		if err != goredis.Nil {
-			v := kvspace.DecodeXValue(data)
-			switch v.Kind() {
-			case kvspace.KindIndex:
-				nodes = kvspace.DecodeIndex(v)
-				if len(nodes) == 1 && nodes[0] == "" { nodes = nil }
-			case kvspace.KindExtIndex:
-				nodes, extpath = kvspace.DecodeExtIndex(v)
+			v := kvspace.DecodeXValueHead(data).Decode()
+			switch v := v.(type) {
+			case kvspace.Index:
+				nodes = v.Children()
+				if len(nodes) == 1 && nodes[0] == "" {
+					nodes = nil
+				}
+			case kvspace.ExtIndex:
+				nodes = v.Children()
+				extpath = v.ExtPath()
 				isExt = true
+			default:
+				panic(fmt.Sprintf("Set parentChildren: unexpected kind %s", v.Kind()))
 			}
 		}
 		seen := make(map[string]bool, len(nodes)+len(names))
@@ -269,9 +314,9 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 			}
 		}
 		if isExt {
-			pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewExtIndexValue(nodes, extpath)), 0)
+			pipe.Set(ctx, parent, kvspace.NewExtIndex(nodes, extpath).Encode(), 0)
 		} else {
-			pipe.Set(ctx, parent, kvspace.EncodeXValue(kvspace.NewIndexValue(nodes)), 0)
+			pipe.Set(ctx, parent, kvspace.NewIndex(nodes).Encode(), 0)
 		}
 	}
 
@@ -293,8 +338,12 @@ func (r *redisImpl) List(prefix string, expandExt bool) []string {
 
 	var extMembers []string
 	if expandExt {
-		if extT := r.getExtTarget(ctx, resolved); extT != "" {
-			extMembers = r.readDirIndex(ctx, extT)
+		if data, err := r.rdb.Get(ctx, resolved).Bytes(); err == nil {
+			head := kvspace.DecodeXValueHead(data)
+			if head.Kind == kvspace.KindExtIndex {
+				extT := kvspace.DecodeExtIndex(head.Raw).ExtPath()
+				extMembers = r.readDirIndex(ctx, extT)
+			}
 		}
 	}
 
@@ -323,17 +372,24 @@ func (r *redisImpl) Del(keys ...string) error {
 		resolved := r.resolveParent(ctx, key)
 		parent, name := parentName(resolved)
 
-			if extT := r.getExtTarget(ctx, parent); extT != "" {
-			localNodes := r.readDirIndex(ctx, parent)
-			localExists := false
-			for _, n := range localNodes {
-				if n == name { localExists = true; break }
-			}
-			if !localExists {
-				extNodes := r.readDirIndex(ctx, extT)
-				for _, n := range extNodes {
+		if data, err := r.rdb.Get(ctx, parent).Bytes(); err == nil {
+			head := kvspace.DecodeXValueHead(data)
+			if head.Kind == kvspace.KindExtIndex {
+				extT := kvspace.DecodeExtIndex(head.Raw).ExtPath()
+				localNodes := r.readDirIndex(ctx, parent)
+				localExists := false
+				for _, n := range localNodes {
 					if n == name {
-						panic(fmt.Errorf("%w: %s", kvspace.ErrExtDel, resolved))
+						localExists = true
+						break
+					}
+				}
+				if !localExists {
+					extNodes := r.readDirIndex(ctx, extT)
+					for _, n := range extNodes {
+						if n == name {
+							panic(fmt.Errorf("%w: %s", kvspace.ErrExtDel, resolved))
+						}
 					}
 				}
 			}
@@ -364,8 +420,8 @@ func (r *redisImpl) DelTree(prefix string) error {
 	}
 	data, err := r.rdb.Get(ctx, linkKey).Bytes()
 	if err == nil {
-		v := kvspace.DecodeXValue(data)
-		if v.Kind() == kvspace.KindLinkIndex {
+		head := kvspace.DecodeXValueHead(data)
+		if head.Kind == kvspace.KindLinkIndex {
 			return r.Del(prefix)
 		}
 	} else if err != goredis.Nil {
@@ -396,7 +452,7 @@ func (r *redisImpl) DelTree(prefix string) error {
 func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
 	ctx := bg
 	resolved := r.resolvePath(ctx, key)
-	return r.rdb.LPush(ctx, notifyPrefix+resolved, kvspace.EncodeXValue(val)).Err()
+	return r.rdb.LPush(ctx, notifyPrefix+resolved, val.Encode()).Err()
 }
 
 func (r *redisImpl) Watch(key string, timeout time.Duration) kvspace.XValue {
@@ -404,9 +460,9 @@ func (r *redisImpl) Watch(key string, timeout time.Duration) kvspace.XValue {
 	resolved := r.resolvePath(ctx, key)
 	results, err := r.rdb.BLPop(ctx, timeout, notifyPrefix+resolved).Result()
 	if err != nil || len(results) < 2 {
-		return kvspace.None()
+		return kvspace.None{}
 	}
-	return kvspace.DecodeXValue([]byte(results[1]))
+	return kvspace.DecodeXValueHead([]byte(results[1])).Decode()
 }
 
 // ── Link ──────────────────────────────────────────────────────────────────────
@@ -429,8 +485,10 @@ func (r *redisImpl) Link(target, linkpath string) error {
 	kvspace.MkIndexRecursive(r, parent)
 
 	pipe := r.rdb.Pipeline()
-	pipe.Set(ctx, storeKey, kvspace.EncodeXValue(kvspace.NewLinkValue(target)), 0)
-	if isDir(resolved) { name += kvspace.DirIndexSuf }
+	pipe.Set(ctx, storeKey, kvspace.NewLinkIndex(target).Encode(), 0)
+	if isDir(resolved) {
+		name += kvspace.DirIndexSuf
+	}
 	r.addChild(ctx, pipe, parent, name)
 	_, err := pipe.Exec(ctx)
 	return err
@@ -445,7 +503,8 @@ func (r *redisImpl) ExtIndex(path, extpath string) error {
 	}
 
 	if data, err := r.rdb.Get(ctx, extpath).Bytes(); err == nil {
-		if v := kvspace.DecodeXValue(data); v.Kind() == kvspace.KindExtIndex {
+		head := kvspace.DecodeXValueHead(data)
+		if head.Kind == kvspace.KindExtIndex {
 			return fmt.Errorf("%w: %s", kvspace.ErrExtCascade, extpath)
 		}
 	} else if err != goredis.Nil {
@@ -457,9 +516,8 @@ func (r *redisImpl) ExtIndex(path, extpath string) error {
 	kvspace.MkIndexRecursive(r, parent)
 
 	pipe := r.rdb.Pipeline()
-	val := kvspace.NewExtIndexValue(nil, extpath)
-	pipe.Set(ctx, resolved, kvspace.EncodeXValue(val), 0)
-	r.addChild(ctx, pipe, parent, name + kvspace.DirIndexSuf)
+	pipe.Set(ctx, resolved, kvspace.NewExtIndex(nil, extpath).Encode(), 0)
+	r.addChild(ctx, pipe, parent, name+kvspace.DirIndexSuf)
 	_, err := pipe.Exec(ctx)
 	return err
 }
@@ -476,8 +534,8 @@ func (r *redisImpl) UnLink(path string) error {
 	}
 	data, err := r.rdb.Get(ctx, linkKey).Bytes()
 	if err == nil {
-		v := kvspace.DecodeXValue(data)
-		if v.Kind() == kvspace.KindLinkIndex {
+		head := kvspace.DecodeXValueHead(data)
+		if head.Kind == kvspace.KindLinkIndex {
 			pipe := r.rdb.Pipeline()
 			pipe.Del(ctx, linkKey)
 			parent, name := parentName(resolved)
@@ -499,5 +557,5 @@ func (r *redisImpl) UnLink(path string) error {
 
 // ── Clear / DisConn ───────────────────────────────────────────────────────────
 
-func (r *redisImpl) Clear() error  { return r.rdb.FlushDB(bg).Err() }
+func (r *redisImpl) Clear() error   { return r.rdb.FlushDB(bg).Err() }
 func (r *redisImpl) DisConn() error { return r.rdb.Close() }

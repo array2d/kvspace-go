@@ -33,8 +33,8 @@ type KVSpace interface {
 
 	// ── 目录操作 ─────────────────────────────────────────────────────────
 	List(prefix string, expandExt bool) []string // 列出直接子项名；expandExt 合并 extindex 子项
-	Del(keys ...string) error    // 精确删除（含索引清理）
-	DelTree(prefix string) error // 递归删除；prefix 本身是链接则只删链接
+	Del(keys ...string) error                    // 精确删除（含索引清理）
+	DelTree(prefix string) error                 // 递归删除；prefix 本身是链接则只删链接
 
 	// ── 变更通知 ─────────────────────────────────────────────────────────
 	Notify(key string, val XValue) error            // 投递一次性通知信号
