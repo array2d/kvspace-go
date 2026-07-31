@@ -39,11 +39,4 @@ func (v Char) At(idx int) rune {
 	return r
 }
 
-func AsString(v XValue) string {
-	if c, ok := v.(Char); ok {
-		return string(c.xvaluebody)
-	}
-	panic(typeError(KindString, v.Kind()))
-}
-
 func DecodeChar(raw []byte) Char { return Char{xvaluebody: raw} }

@@ -28,5 +28,4 @@ func (v Bool) At(idx int) bool {
 	return v.xvaluebody[idx] != 0
 }
 
-func AsBool(v XValue) bool              { return v.(Bool).At(0) }
 func DecodeBool(xvaluebody []byte) Bool { return Bool{xvaluebody: xvaluebody} }

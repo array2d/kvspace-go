@@ -29,5 +29,4 @@ func (v Time) At(idx int) int64 {
 	return int64(binary.LittleEndian.Uint64(v.xvaluebody[idx*8:]))
 }
 
-func AsTime(v XValue) int64             { return v.(Time).At(0) }
 func DecodeTime(xvaluebody []byte) Time { return Time{xvaluebody: xvaluebody} }

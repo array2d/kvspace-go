@@ -47,5 +47,4 @@ func (v Bytes) At(idx int) []byte {
 	return v.xvaluebody[start : end-1]
 }
 
-func AsBytes(v XValue) []byte             { return v.(Bytes).At(0) }
 func DecodeBytes(xvaluebody []byte) Bytes { return Bytes{xvaluebody: xvaluebody} }
