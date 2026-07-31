@@ -21,7 +21,7 @@ func main() {
 	dsn := fs.String("kvspace", defaultKVSpace(), "kvspace DSN (redis://host:port)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvspace [--kvspace dsn] <subcommand> [args]")
-		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mkindex link unlink extindex list array2d tree dump watch notify clear")
+		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mkindex link unlink extindex list|ls array2d tree dump watch notify clear")
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[1:])
@@ -68,7 +68,7 @@ func main() {
 	case "extindex":
 		if len(sub) < 3 { exitUsage("kvspace extindex <path> <extpath>") }
 		if err := kv.ExtIndex(sub[1], sub[2]); err != nil { fatalf("%v", err) }
-	case "list":
+	case "list", "ls":
 		cmdList(kv, sub[1:])
 	case "array2d":
 		cmdArray2D(kv, sub[1:])
