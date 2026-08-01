@@ -1,6 +1,9 @@
 package kvspace
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // ── Index ────────────────────────────────────────────────────────────────
 
@@ -11,6 +14,7 @@ func NewIndex(children []string) Index {
 }
 
 func (v Index) Kind() string    { return KindIndex }
+func (v Index) String() string  { c := v.Children(); return fmt.Sprintf("(%d)", len(c)) }
 func (v Index) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Index) ArrayLen() int32 { return 1 }
 func (v Index) Encode() []byte  { return TLVEncode(KindIndex, v.xvaluebody, 1) }
@@ -32,6 +36,7 @@ type LinkIndex struct{ xvaluebody []byte }
 func NewLinkIndex(target string) LinkIndex { return LinkIndex{xvaluebody: []byte(target)} }
 
 func (v LinkIndex) Kind() string    { return KindLinkIndex }
+func (v LinkIndex) String() string  { return "→" + v.Target() }
 func (v LinkIndex) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v LinkIndex) ArrayLen() int32 { return 1 }
 func (v LinkIndex) Encode() []byte  { return TLVEncode(KindLinkIndex, v.xvaluebody, 1) }
@@ -50,6 +55,7 @@ func NewExtIndex(children []string, extpath string) ExtIndex {
 }
 
 func (v ExtIndex) Kind() string    { return KindExtIndex }
+func (v ExtIndex) String() string  { c, ep := v.Children(), v.ExtPath(); return fmt.Sprintf("(%d) …%s", len(c), ep) }
 func (v ExtIndex) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v ExtIndex) ArrayLen() int32 { return 1 }
 func (v ExtIndex) Encode() []byte  { return TLVEncode(KindExtIndex, v.xvaluebody, 1) }

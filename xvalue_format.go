@@ -3,9 +3,31 @@ package kvspace
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // ── 显示 ─────────────────────────────────────────────────────────────────
+
+// fmtFloat 格式化浮点，整数加 .0。
+func fmtFloat(v float64, bitSize int) string {
+	s := strconv.FormatFloat(v, 'f', -1, bitSize)
+	if !strings.Contains(s, ".") {
+		s += ".0"
+	}
+	return s
+}
+
+// fmtArray 格式化数组：[elem0, elem1, ...]；len==1 时仅返元素本身。
+func fmtArray(n int, fn func(int) string) string {
+	if n == 1 {
+		return fn(0)
+	}
+	parts := make([]string, n)
+	for i := 0; i < n; i++ {
+		parts[i] = fn(i)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
 
 func fmtKindVal(v XValue) string {
 	switch v := v.(type) {

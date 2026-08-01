@@ -12,24 +12,6 @@ import (
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
 
-func (r *redisImpl) getExtTarget(ctx context.Context, key string) string {
-	data, err := r.rdb.Get(ctx, key).Bytes()
-	if err != nil {
-		if err == goredis.Nil {
-			return ""
-		}
-		panic(fmt.Errorf("%w: getExtTarget key=%s err=%v", kvspace.ErrGet, key, err))
-	}
-	head := kvspace.DecodeXValueHead(data)
-	if head.Kind == kvspace.KindExtIndex {
-		return kvspace.DecodeExtIndex(head.Raw).ExtPath()
-	}
-	if head.Kind != "" {
-		panic(fmt.Errorf("getExtTarget: expected extindex, got %s", head.Kind))
-	}
-	return ""
-}
-
 // ── Get ───────────────────────────────────────────────────────────────────────
 
 func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
