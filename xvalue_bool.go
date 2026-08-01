@@ -1,6 +1,9 @@
 package kvspace
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 // ── Bool ─────────────────────────────────────────────────────────────────
 
@@ -17,6 +20,7 @@ func NewBool(v ...bool) Bool {
 }
 
 func (v Bool) Kind() string    { return KindBool }
+func (v Bool) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatBool(v.At(i)) }) }
 func (v Bool) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Bool) ArrayLen() int32 { return int32(len(v.xvaluebody)) }
 func (v Bool) Encode() []byte  { return TLVEncode(KindBool, v.xvaluebody, v.ArrayLen()) }

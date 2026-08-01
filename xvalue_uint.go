@@ -3,6 +3,7 @@ package kvspace
 import (
 	"encoding/binary"
 	"fmt"
+	"strconv"
 )
 
 // ── Uint8 ────────────────────────────────────────────────────────────────
@@ -18,6 +19,7 @@ func NewUint8(v ...uint8) Uint8 {
 }
 
 func (v Uint8) Kind() string    { return KindUint8 }
+func (v Uint8) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatUint(uint64(v.At(i)), 10) }) }
 func (v Uint8) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Uint8) ArrayLen() int32 { return int32(len(v.xvaluebody)) }
 func (v Uint8) Encode() []byte  { return TLVEncode(KindUint8, v.xvaluebody, v.ArrayLen()) }
@@ -44,6 +46,7 @@ func NewUint16(v ...uint16) Uint16 {
 }
 
 func (v Uint16) Kind() string    { return KindUint16 }
+func (v Uint16) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatUint(uint64(v.At(i)), 10) }) }
 func (v Uint16) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Uint16) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 2 }
 func (v Uint16) Encode() []byte  { return TLVEncode(KindUint16, v.xvaluebody, v.ArrayLen()) }
@@ -70,6 +73,7 @@ func NewUint32(v ...uint32) Uint32 {
 }
 
 func (v Uint32) Kind() string    { return KindUint32 }
+func (v Uint32) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatUint(uint64(v.At(i)), 10) }) }
 func (v Uint32) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Uint32) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 4 }
 func (v Uint32) Encode() []byte  { return TLVEncode(KindUint32, v.xvaluebody, v.ArrayLen()) }
@@ -96,6 +100,7 @@ func NewUint64(v ...uint64) Uint64 {
 }
 
 func (v Uint64) Kind() string    { return KindUint64 }
+func (v Uint64) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatUint(v.At(i), 10) }) }
 func (v Uint64) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Uint64) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 8 }
 func (v Uint64) Encode() []byte  { return TLVEncode(KindUint64, v.xvaluebody, v.ArrayLen()) }

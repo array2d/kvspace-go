@@ -68,6 +68,7 @@ type XValue interface {
 	Encode() []byte  // 完整 TLV 编码：[1B kind_len][N B kind][4B al LE][4B raw_len LE][M B raw]
 	ByteLen() int32  // 数据字节长度
 	ArrayLen() int32 // None=0, scalar=1, array=N
+	String() string  // 纯值，无 kind 前缀（fmt.Stringer）
 }
 
 // ── None ─────────────────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ func (None) Kind() string    { return "" }
 func (None) Encode() []byte  { return nil }
 func (None) ByteLen() int32  { return 0 }
 func (None) ArrayLen() int32 { return 0 }
+func (None) String() string  { return "" }
 
 func IsNone(v XValue) bool {
 	if v == nil {

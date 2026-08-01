@@ -19,6 +19,7 @@ func NewFloat32(v ...float32) Float32 {
 }
 
 func (v Float32) Kind() string    { return KindFloat32 }
+func (v Float32) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return fmtFloat(float64(v.At(i)), 32) }) }
 func (v Float32) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Float32) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 4 }
 func (v Float32) Encode() []byte  { return TLVEncode(KindFloat32, v.xvaluebody, v.ArrayLen()) }
@@ -45,6 +46,7 @@ func NewFloat64(v ...float64) Float64 {
 }
 
 func (v Float64) Kind() string    { return KindFloat64 }
+func (v Float64) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return fmtFloat(v.At(i), 64) }) }
 func (v Float64) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Float64) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 8 }
 func (v Float64) Encode() []byte  { return TLVEncode(KindFloat64, v.xvaluebody, v.ArrayLen()) }

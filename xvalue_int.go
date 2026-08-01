@@ -3,6 +3,7 @@ package kvspace
 import (
 	"encoding/binary"
 	"fmt"
+	"strconv"
 )
 
 // ── Int8 ─────────────────────────────────────────────────────────────────
@@ -18,6 +19,7 @@ func NewInt8(v ...int8) Int8 {
 }
 
 func (v Int8) Kind() string    { return KindInt8 }
+func (v Int8) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatInt(int64(v.At(i)), 10) }) }
 func (v Int8) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Int8) ArrayLen() int32 { return int32(len(v.xvaluebody)) }
 func (v Int8) Encode() []byte  { return TLVEncode(KindInt8, v.xvaluebody, v.ArrayLen()) }
@@ -44,6 +46,7 @@ func NewInt16(v ...int16) Int16 {
 }
 
 func (v Int16) Kind() string    { return KindInt16 }
+func (v Int16) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatInt(int64(v.At(i)), 10) }) }
 func (v Int16) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Int16) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 2 }
 func (v Int16) Encode() []byte  { return TLVEncode(KindInt16, v.xvaluebody, v.ArrayLen()) }
@@ -70,6 +73,7 @@ func NewInt32(v ...int32) Int32 {
 }
 
 func (v Int32) Kind() string    { return KindInt32 }
+func (v Int32) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatInt(int64(v.At(i)), 10) }) }
 func (v Int32) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Int32) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 4 }
 func (v Int32) Encode() []byte  { return TLVEncode(KindInt32, v.xvaluebody, v.ArrayLen()) }
@@ -96,6 +100,7 @@ func NewInt64(v ...int64) Int64 {
 }
 
 func (v Int64) Kind() string    { return KindInt64 }
+func (v Int64) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatInt(v.At(i), 10) }) }
 func (v Int64) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Int64) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 8 }
 func (v Int64) Encode() []byte  { return TLVEncode(KindInt64, v.xvaluebody, v.ArrayLen()) }
