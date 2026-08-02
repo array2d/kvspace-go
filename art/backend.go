@@ -912,8 +912,7 @@ func (b *backend) validateExtTargetsLocked() error {
 			if i == j {
 				continue
 			}
-			if strings.HasPrefix(other.localDir, binding.localDir) ||
-				strings.HasPrefix(other.localDir, binding.targetDir) {
+			if strings.HasPrefix(other.localDir, binding.targetDir) {
 				return fmt.Errorf("%w: %s", kvspace.ErrExtCascade, other.localDir)
 			}
 		}
@@ -1342,7 +1341,7 @@ func validateIndexChild(child string) error {
 
 func encodeStoredValue(value kvspace.XValue) ([]byte, kvspace.XValue, error) {
 	if kvspace.IsNone(value) {
-		return nil, nil, kvspace.ErrInvalidValue
+		return []byte{}, kvspace.None{}, nil
 	}
 	encoded := value.Encode()
 	decoded := kvspace.DecodeXValueHead(encoded).Decode()
