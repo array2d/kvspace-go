@@ -45,6 +45,8 @@ func (h XValueHead) Decode() XValue {
 		return DecodeBytes(h.Raw)
 	case "time":
 		return DecodeTime(h.Raw)
+	case "duration":
+		return DecodeDuration(h.Raw)
 	case KindDict:
 		return Dict{}
 	case KindIndex:
