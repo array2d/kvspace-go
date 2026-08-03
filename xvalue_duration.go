@@ -8,23 +8,17 @@ import (
 
 // ── Duration ─────────────────────────────────────────────────────────────
 
-type Duration struct{ xvaluebody []byte }
+type Duration struct{ data []int64 }
 
-func NewDuration(v ...int64) Duration {
-	raw := make([]byte, len(v)*8)
-	for i, val := range v {
-		binary.LittleEndian.PutUint64(raw[i*8:], uint64(val))
-	}
-	return Duration{xvaluebody: raw}
-}
+func NewDuration(v ...int64) Duration { return Duration{data: v} }
 
 func (v Duration) Kind() string { return "duration" }
 
 func (v Duration) String() string {
-	if v.ArrayLen() > 1 {
-		return fmtArray(int(v.ArrayLen()), func(i int) string { return formatDuration(v.At(i)) })
+	if len(v.data) > 1 {
+		return fmtArray(len(v.data), func(i int) string { return formatDuration(v.data[i]) })
 	}
-	return formatDuration(v.At(0))
+	return formatDuration(v.data[0])
 }
 
 // formatDuration 对齐 Go time.Duration.String()：0s / 1.5s / 2m3s / 1h2m3s
@@ -63,15 +57,26 @@ func formatDuration(ns int64) string {
 	return sign + strings.Join(parts, "")
 }
 
-func (v Duration) ByteLen() int32  { return int32(len(v.xvaluebody)) }
-func (v Duration) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 8 }
-func (v Duration) Encode() []byte  { return TLVEncode("duration", v.xvaluebody, v.ArrayLen()) }
-func (v Duration) At(idx int) int64 {
-	n := int(v.ArrayLen())
-	if idx < 0 || idx >= n {
-		panic(fmt.Sprintf("Duration.At: index %d out of range [0,%d)", idx, n))
+func (v Duration) ByteLen() int32  { return int32(len(v.data) * 8) }
+func (v Duration) ArrayLen() int32 { return int32(len(v.data)) }
+func (v Duration) Encode() []byte {
+	raw := make([]byte, len(v.data)*8)
+	for i, val := range v.data {
+		binary.LittleEndian.PutUint64(raw[i*8:], uint64(val))
 	}
-	return int64(binary.LittleEndian.Uint64(v.xvaluebody[idx*8:]))
+	return TLVEncode("duration", raw, v.ArrayLen())
+}
+func (v Duration) At(idx int) int64 {
+	if idx < 0 || idx >= len(v.data) {
+		panic(fmt.Sprintf("Duration.At: index %d out of range [0,%d)", idx, len(v.data)))
+	}
+	return v.data[idx]
 }
 
-func DecodeDuration(xvaluebody []byte) Duration { return Duration{xvaluebody: xvaluebody} }
+func DecodeDuration(xvaluebody []byte) Duration {
+	data := make([]int64, len(xvaluebody)/8)
+	for i := range data {
+		data[i] = int64(binary.LittleEndian.Uint64(xvaluebody[i*8:]))
+	}
+	return Duration{data: data}
+}

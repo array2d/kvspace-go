@@ -7,72 +7,79 @@ import (
 
 // ── Index ────────────────────────────────────────────────────────────────
 
-type Index struct{ xvaluebody []byte }
+type Index struct{ childs []string }
 
-func NewIndex(children []string) Index {
-	return Index{xvaluebody: []byte(strings.Join(children, IndexValueSep))}
-}
+func NewIndex(children []string) Index { return Index{childs: children} }
 
 func (v Index) Kind() string    { return KindIndex }
-func (v Index) String() string  { c := v.Children(); return fmt.Sprintf("(%d)", len(c)) }
-func (v Index) ByteLen() int32  { return int32(len(v.xvaluebody)) }
+func (v Index) String() string  { return fmt.Sprintf("(%d)", len(v.childs)) }
+func (v Index) ByteLen() int32  { return int32(len([]byte(strings.Join(v.childs, IndexValueSep)))) }
 func (v Index) ArrayLen() int32 { return 1 }
-func (v Index) Encode() []byte  { return TLVEncode(KindIndex, v.xvaluebody, 1) }
+func (v Index) Encode() []byte  { return TLVEncode(KindIndex, []byte(strings.Join(v.childs, IndexValueSep)), 1) }
 
-func (v Index) Children() []string {
-	s := string(v.xvaluebody)
+func (v Index) Children() []string { return v.childs }
+
+func DecodeIndex(xvaluebody []byte) Index {
+	s := string(xvaluebody)
 	if s == "" {
-		return nil
+		return Index{}
 	}
-	return strings.Split(s, IndexValueSep)
+	return Index{childs: strings.Split(s, IndexValueSep)}
 }
-
-func DecodeIndex(xvaluebody []byte) Index { return Index{xvaluebody: xvaluebody} }
 
 // ── LinkIndex ────────────────────────────────────────────────────────────
 
-type LinkIndex struct{ xvaluebody []byte }
+type LinkIndex struct{ target string }
 
-func NewLinkIndex(target string) LinkIndex { return LinkIndex{xvaluebody: []byte(target)} }
+func NewLinkIndex(target string) LinkIndex { return LinkIndex{target: target} }
 
 func (v LinkIndex) Kind() string    { return KindLinkIndex }
-func (v LinkIndex) String() string  { return "→" + v.Target() }
-func (v LinkIndex) ByteLen() int32  { return int32(len(v.xvaluebody)) }
+func (v LinkIndex) String() string  { return "→" + v.target }
+func (v LinkIndex) ByteLen() int32  { return int32(len(v.target)) }
 func (v LinkIndex) ArrayLen() int32 { return 1 }
-func (v LinkIndex) Encode() []byte  { return TLVEncode(KindLinkIndex, v.xvaluebody, 1) }
+func (v LinkIndex) Encode() []byte  { return TLVEncode(KindLinkIndex, []byte(v.target), 1) }
 
-func (v LinkIndex) Target() string { return string(v.xvaluebody) }
+func (v LinkIndex) Target() string { return v.target }
 
-func DecodeLinkIndex(xvaluebody []byte) LinkIndex { return LinkIndex{xvaluebody: xvaluebody} }
+func DecodeLinkIndex(xvaluebody []byte) LinkIndex { return LinkIndex{target: string(xvaluebody)} }
 
 // ── ExtIndex ─────────────────────────────────────────────────────────────
 
-type ExtIndex struct{ xvaluebody []byte }
+type ExtIndex struct {
+	childs  []string
+	extpath string
+}
 
 func NewExtIndex(children []string, extpath string) ExtIndex {
-	parts := append([]string{ExtIndexHead + extpath}, children...)
-	return ExtIndex{xvaluebody: []byte(strings.Join(parts, IndexValueSep))}
+	return ExtIndex{childs: children, extpath: extpath}
 }
 
 func (v ExtIndex) Kind() string    { return KindExtIndex }
-func (v ExtIndex) String() string  { c, ep := v.Children(), v.ExtPath(); return fmt.Sprintf("(%d) …%s", len(c), ep) }
-func (v ExtIndex) ByteLen() int32  { return int32(len(v.xvaluebody)) }
+func (v ExtIndex) String() string  { return fmt.Sprintf("(%d) …%s", len(v.childs), v.extpath) }
+func (v ExtIndex) ByteLen() int32 {
+	body := encodeExtIndexRaw(v.extpath, v.childs)
+	return int32(len(body))
+}
 func (v ExtIndex) ArrayLen() int32 { return 1 }
-func (v ExtIndex) Encode() []byte  { return TLVEncode(KindExtIndex, v.xvaluebody, 1) }
-
-func (v ExtIndex) Children() []string {
-	_, children := decodeExtIndexRaw(v.xvaluebody)
-	return children
+func (v ExtIndex) Encode() []byte {
+	body := encodeExtIndexRaw(v.extpath, v.childs)
+	return TLVEncode(KindExtIndex, body, 1)
 }
 
-func (v ExtIndex) ExtPath() string {
-	extpath, _ := decodeExtIndexRaw(v.xvaluebody)
-	return extpath
-}
+func (v ExtIndex) Children() []string { return v.childs }
+func (v ExtIndex) ExtPath() string    { return v.extpath }
 
-func DecodeExtIndex(xvaluebody []byte) ExtIndex { return ExtIndex{xvaluebody: xvaluebody} }
+func DecodeExtIndex(xvaluebody []byte) ExtIndex {
+	extpath, children := decodeExtIndexRaw(xvaluebody)
+	return ExtIndex{childs: children, extpath: extpath}
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────
+
+func encodeExtIndexRaw(extpath string, children []string) []byte {
+	parts := append([]string{ExtIndexHead + extpath}, children...)
+	return []byte(strings.Join(parts, IndexValueSep))
+}
 
 func decodeExtIndexRaw(xvaluebody []byte) (extpath string, children []string) {
 	s := string(xvaluebody)
