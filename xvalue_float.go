@@ -8,54 +8,64 @@ import (
 
 // ── Float32 ──────────────────────────────────────────────────────────────
 
-type Float32 struct{ xvaluebody []byte }
+type Float32 struct{ data []float32 }
 
-func NewFloat32(v ...float32) Float32 {
-	raw := make([]byte, len(v)*4)
-	for i, val := range v {
-		binary.LittleEndian.PutUint32(raw[i*4:], math.Float32bits(val))
-	}
-	return Float32{xvaluebody: raw}
-}
+func NewFloat32(v ...float32) Float32 { return Float32{data: v} }
 
 func (v Float32) Kind() string    { return KindFloat32 }
-func (v Float32) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return fmtFloat(float64(v.At(i)), 32) }) }
-func (v Float32) ByteLen() int32  { return int32(len(v.xvaluebody)) }
-func (v Float32) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 4 }
-func (v Float32) Encode() []byte  { return TLVEncode(KindFloat32, v.xvaluebody, v.ArrayLen()) }
-func (v Float32) At(idx int) float32 {
-	n := int(v.ArrayLen())
-	if idx < 0 || idx >= n {
-		panic(fmt.Sprintf("Float32.At: index %d out of range [0,%d)", idx, n))
+func (v Float32) String() string  { return fmtArray(len(v.data), func(i int) string { return fmtFloat(float64(v.data[i]), 32) }) }
+func (v Float32) ByteLen() int32  { return int32(len(v.data) * 4) }
+func (v Float32) ArrayLen() int32 { return int32(len(v.data)) }
+func (v Float32) Encode() []byte {
+	raw := make([]byte, len(v.data)*4)
+	for i, val := range v.data {
+		binary.LittleEndian.PutUint32(raw[i*4:], math.Float32bits(val))
 	}
-	return math.Float32frombits(binary.LittleEndian.Uint32(v.xvaluebody[idx*4:]))
+	return TLVEncode(KindFloat32, raw, v.ArrayLen())
+}
+func (v Float32) At(idx int) float32 {
+	if idx < 0 || idx >= len(v.data) {
+		panic(fmt.Sprintf("Float32.At: index %d out of range [0,%d)", idx, len(v.data)))
+	}
+	return v.data[idx]
 }
 
-func DecodeFloat32(xvaluebody []byte) Float32 { return Float32{xvaluebody: xvaluebody} }
+func DecodeFloat32(xvaluebody []byte) Float32 {
+	data := make([]float32, len(xvaluebody)/4)
+	for i := range data {
+		data[i] = math.Float32frombits(binary.LittleEndian.Uint32(xvaluebody[i*4:]))
+	}
+	return Float32{data: data}
+}
 
 // ── Float64 ──────────────────────────────────────────────────────────────
 
-type Float64 struct{ xvaluebody []byte }
+type Float64 struct{ data []float64 }
 
-func NewFloat64(v ...float64) Float64 {
-	raw := make([]byte, len(v)*8)
-	for i, val := range v {
-		binary.LittleEndian.PutUint64(raw[i*8:], math.Float64bits(val))
-	}
-	return Float64{xvaluebody: raw}
-}
+func NewFloat64(v ...float64) Float64 { return Float64{data: v} }
 
 func (v Float64) Kind() string    { return KindFloat64 }
-func (v Float64) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return fmtFloat(v.At(i), 64) }) }
-func (v Float64) ByteLen() int32  { return int32(len(v.xvaluebody)) }
-func (v Float64) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 8 }
-func (v Float64) Encode() []byte  { return TLVEncode(KindFloat64, v.xvaluebody, v.ArrayLen()) }
-func (v Float64) At(idx int) float64 {
-	n := int(v.ArrayLen())
-	if idx < 0 || idx >= n {
-		panic(fmt.Sprintf("Float64.At: index %d out of range [0,%d)", idx, n))
+func (v Float64) String() string  { return fmtArray(len(v.data), func(i int) string { return fmtFloat(v.data[i], 64) }) }
+func (v Float64) ByteLen() int32  { return int32(len(v.data) * 8) }
+func (v Float64) ArrayLen() int32 { return int32(len(v.data)) }
+func (v Float64) Encode() []byte {
+	raw := make([]byte, len(v.data)*8)
+	for i, val := range v.data {
+		binary.LittleEndian.PutUint64(raw[i*8:], math.Float64bits(val))
 	}
-	return math.Float64frombits(binary.LittleEndian.Uint64(v.xvaluebody[idx*8:]))
+	return TLVEncode(KindFloat64, raw, v.ArrayLen())
+}
+func (v Float64) At(idx int) float64 {
+	if idx < 0 || idx >= len(v.data) {
+		panic(fmt.Sprintf("Float64.At: index %d out of range [0,%d)", idx, len(v.data)))
+	}
+	return v.data[idx]
 }
 
-func DecodeFloat64(xvaluebody []byte) Float64 { return Float64{xvaluebody: xvaluebody} }
+func DecodeFloat64(xvaluebody []byte) Float64 {
+	data := make([]float64, len(xvaluebody)/8)
+	for i := range data {
+		data[i] = math.Float64frombits(binary.LittleEndian.Uint64(xvaluebody[i*8:]))
+	}
+	return Float64{data: data}
+}

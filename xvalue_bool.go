@@ -7,29 +7,34 @@ import (
 
 // ── Bool ─────────────────────────────────────────────────────────────────
 
-type Bool struct{ xvaluebody []byte }
+type Bool struct{ data []bool }
 
-func NewBool(v ...bool) Bool {
-	raw := make([]byte, len(v))
-	for i, val := range v {
-		if val {
+func NewBool(v ...bool) Bool { return Bool{data: v} }
+
+func (v Bool) Kind() string    { return KindBool }
+func (v Bool) String() string  { return fmtArray(len(v.data), func(i int) string { return strconv.FormatBool(v.data[i]) }) }
+func (v Bool) ByteLen() int32  { return int32(len(v.data)) }
+func (v Bool) ArrayLen() int32 { return int32(len(v.data)) }
+func (v Bool) Encode() []byte {
+	raw := make([]byte, len(v.data))
+	for i, b := range v.data {
+		if b {
 			raw[i] = 1
 		}
 	}
-	return Bool{xvaluebody: raw}
+	return TLVEncode(KindBool, raw, v.ArrayLen())
 }
-
-func (v Bool) Kind() string    { return KindBool }
-func (v Bool) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatBool(v.At(i)) }) }
-func (v Bool) ByteLen() int32  { return int32(len(v.xvaluebody)) }
-func (v Bool) ArrayLen() int32 { return int32(len(v.xvaluebody)) }
-func (v Bool) Encode() []byte  { return TLVEncode(KindBool, v.xvaluebody, v.ArrayLen()) }
 func (v Bool) At(idx int) bool {
-	n := int(v.ArrayLen())
-	if idx < 0 || idx >= n {
-		panic(fmt.Sprintf("Bool.At: index %d out of range [0,%d)", idx, n))
+	if idx < 0 || idx >= len(v.data) {
+		panic(fmt.Sprintf("Bool.At: index %d out of range [0,%d)", idx, len(v.data)))
 	}
-	return v.xvaluebody[idx] != 0
+	return v.data[idx]
 }
 
-func DecodeBool(xvaluebody []byte) Bool { return Bool{xvaluebody: xvaluebody} }
+func DecodeBool(xvaluebody []byte) Bool {
+	data := make([]bool, len(xvaluebody))
+	for i, b := range xvaluebody {
+		data[i] = b != 0
+	}
+	return Bool{data: data}
+}
