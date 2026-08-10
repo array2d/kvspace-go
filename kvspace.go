@@ -28,17 +28,19 @@ type KVPair struct {
 // 不穿透 target；路径中的祖先链接仍穿透（Del("/alias/x") 删 /real/x）。
 type KVSpace interface {
 	// ── 单点读写 ─────────────────────────────────────────────────────────
-	Get(prefix string, keys []string) []XValue //所有key共享prefix，key不含/；缺失返回xvalue（kind=null）
-	Set(pairs []KVPair) error                  // 写入并维护目录索引,pre路径如果不存在，则汇报异常
+	// resolve: 是否穿透 link。true=获取 target 的值（默认），false=获取 link 本身。
+	Get(prefix string, keys []string, resolve bool) []XValue
+	Set(pairs []KVPair) error // 写入并维护目录索引。总是穿透 link 写入 target。
 
 	// ── 目录操作 ─────────────────────────────────────────────────────────
-	List(prefix string, expandExt bool) []string // 列出直接子项名；expandExt 合并 extindex 子项
-	Del(keys ...string) error                    // 精确删除（含索引清理）
-	DelTree(prefix string) error                 // 递归删除；prefix 本身是链接则只删链接
+	// resolve: 是否穿透 link 列出 target 的子节点。
+	List(prefix string, expandExt bool, resolve bool) []string
+	Del(keys ...string) error    // POSIX rm: 最终组件是 link → 删 link 本体
+	DelTree(prefix string) error // 递归删除；prefix 本身是链接则只删链接
 
 	// ── 变更通知 ─────────────────────────────────────────────────────────
-	Notify(key string, val XValue) error            // 投递一次性通知信号
-	Watch(key string, timeout time.Duration) XValue // 阻塞等待通知
+	Notify(key string, val XValue) error                    // 投递一次性通知信号（穿透 link）
+	Watch(key string, timeout time.Duration) XValue // 阻塞等待通知（穿透 link）
 
 	// ── 目录创建 ─────────────────────────────────────────────────────────
 	Mkindex(path string) error // 递归创建目录，类似 mkdir -p；path 须以 / 结尾

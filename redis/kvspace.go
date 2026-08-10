@@ -14,10 +14,12 @@ import (
 
 // ── Get ───────────────────────────────────────────────────────────────────────
 
-func (r *redisImpl) Get(prefix string, keys []string) []kvspace.XValue {
+func (r *redisImpl) Get(prefix string, keys []string, resolve bool) []kvspace.XValue {
 	ctx := bg
 	assertDir(prefix)
-	prefix = r.resolvePath(ctx, prefix)
+	if resolve {
+		prefix = r.resolvePath(ctx, prefix)
+	}
 
 	var extT string
 	if data, err := r.rdb.Get(ctx, prefix).Bytes(); err == nil {
@@ -308,10 +310,13 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
-func (r *redisImpl) List(prefix string, expandExt bool) []string {
+func (r *redisImpl) List(prefix string, expandExt bool, resolve bool) []string {
 	ctx := bg
 	assertDir(prefix)
-	resolved := r.resolvePath(ctx, prefix)
+	resolved := prefix
+	if resolve {
+		resolved = r.resolvePath(ctx, prefix)
+	}
 	if !isDir(resolved) {
 		return nil
 	}

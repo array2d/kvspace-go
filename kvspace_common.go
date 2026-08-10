@@ -64,21 +64,21 @@ func StripExtChildren(kv KVSpace, prefix string, children []string) []string {
 	if extTarget == "" {
 		return children
 	}
-	extChildren := kv.List(extTarget, false)
+	extChildren := kv.List(extTarget, false, true)
 	return children[:len(children)-len(extChildren)]
 }
 
 // FprintList 打印 prefix 的直接子项。
 // showExt=false 时，先打印自己的 children，再以 =exttarget/ 标记缩进打印 ext 子项。
 func FprintList(w io.Writer, kv KVSpace, prefix string, showExt, showKind bool) {
-	children := kv.List(prefix, true)
+	children := kv.List(prefix, true, true)
 	if !showExt {
 		children = StripExtChildren(kv, prefix, children)
 	}
 	for _, c := range children {
 		v := GetAt(kv, prefix, c)
 		childDir := JoinPath(prefix, c) + DirIndexSuf
-		hasDir := len(kv.List(childDir, false)) > 0
+		hasDir := len(kv.List(childDir, false, true)) > 0
 		if !hasDir {
 			dirV := GetAt(kv, prefix, c+DirIndexSuf)
 			hasDir = !IsNone(dirV)
@@ -100,7 +100,7 @@ func FprintList(w io.Writer, kv KVSpace, prefix string, showExt, showKind bool) 
 	if !showExt {
 		if ext := ReadPrefixExt(kv, prefix); ext != "" {
 			fmt.Fprintln(w, ExtIndexHead+ext)
-			for _, c := range kv.List(ext, false) {
+			for _, c := range kv.List(ext, false, true) {
 				fmt.Fprintln(w, "  "+c)
 			}
 		}
@@ -115,7 +115,7 @@ func FprintList(w io.Writer, kv KVSpace, prefix string, showExt, showKind bool) 
 //
 // 非 [s0,s1] 的条目按 list 格式显示。
 func FprintArray2D(w io.Writer, kv KVSpace, prefix string, showExt, showKind bool) {
-	children := kv.List(prefix, true)
+	children := kv.List(prefix, true, true)
 	if !showExt {
 		children = StripExtChildren(kv, prefix, children)
 	}
@@ -191,7 +191,7 @@ func FprintArray2D(w io.Writer, kv KVSpace, prefix string, showExt, showKind boo
 	for _, c := range regular {
 		v := GetAt(kv, prefix, c)
 		childDir := JoinPath(prefix, c) + DirIndexSuf
-		hasDir := len(kv.List(childDir, false)) > 0
+		hasDir := len(kv.List(childDir, false, true)) > 0
 		if !hasDir {
 			dirV := GetAt(kv, prefix, c+DirIndexSuf)
 			hasDir = !IsNone(dirV)
@@ -219,13 +219,17 @@ func FprintArray2D(w io.Writer, kv KVSpace, prefix string, showExt, showKind boo
 // ── common helpers ────────────────────────────────────────────────────────
 
 func GetAt(kv KVSpace, dir, name string) XValue {
-	return kv.Get(dir, []string{name})[0]
+	return kv.Get(dir, []string{name}, true)[0]
+}
+
+func GetAtRaw(kv KVSpace, dir, name string) XValue {
+	return kv.Get(dir, []string{name}, false)[0]
 }
 
 // ── tree ─────────────────────────────────────────────────────────────────
 
 func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKind bool) {
-	children := kv.List(prefix, true)
+	children := kv.List(prefix, true, true)
 	if !showExt {
 		children = StripExtChildren(kv, prefix, children)
 	}
@@ -326,7 +330,7 @@ func FprintTree(w io.Writer, kv KVSpace, prefix, indent string, showExt, showKin
 		c := ordered[i].name
 		ordered[i].val = GetAt(kv, prefix, c)
 		childDir := JoinPath(prefix, strings.TrimSuffix(c, DirIndexSuf)) + DirIndexSuf
-		if len(kv.List(childDir, false)) > 0 {
+		if len(kv.List(childDir, false, true)) > 0 {
 			ordered[i].childDir = childDir
 		} else if dirV := GetAt(kv, prefix, strings.TrimSuffix(c, DirIndexSuf)+DirIndexSuf); !IsNone(dirV) {
 			ordered[i].childDir = childDir
@@ -439,7 +443,7 @@ func MkIndexRecursive(kv KVSpace, path string) {
 }
 
 func dirExists(kv KVSpace, parentDir, name string) bool {
-	for _, m := range kv.List(parentDir, false) {
+	for _, m := range kv.List(parentDir, false, true) {
 		if m == name || m == name+DirIndexSuf {
 			return true
 		}
@@ -453,7 +457,7 @@ func GetOne(kv KVSpace, key string) XValue {
 	if p != PathSep {
 		p += DirIndexSuf
 	}
-	return kv.Get(p, []string{l})[0]
+	return kv.Get(p, []string{l}, true)[0]
 }
 
 // Walk 递归遍历 prefix 下的树。prefix 须以 / 结尾。
@@ -466,12 +470,12 @@ func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
 		} else if p != PathSep {
 			p += DirIndexSuf
 		}
-		vals := kv.Get(p, []string{l})
+		vals := kv.Get(p, []string{l}, true)
 		if len(vals) > 0 && !IsNone(vals[0]) {
 			fn(clean, vals[0])
 		}
 	}
-	for _, c := range kv.List(prefix, false) {
+	for _, c := range kv.List(prefix, false, true) {
 		Walk(kv, JoinPath(prefix, c)+DirIndexSuf, fn)
 	}
 }
