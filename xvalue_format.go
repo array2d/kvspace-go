@@ -40,7 +40,9 @@ func fmtKindVal(v XValue) string {
 	case Rwir:
 		return v.Sig() + ":" + KindRwir
 	case Rwfunc:
-		return v.Sig() + ":" + KindRwfunc
+		return fmt.Sprintf("r%d/w%d", v.NumReads(), v.NumWrites()) + ":" + KindRwfunc
+	case Ptr:
+		return fmt.Sprintf("→%s:%s", v.Target(), v.Kind())
 	case LinkIndex:
 		return "→" + v.Target()
 	default:
@@ -84,7 +86,9 @@ func fmtPlain(v XValue) string {
 	case Rwir:
 		return v.Sig()
 	case Rwfunc:
-		return v.Sig()
+		return fmt.Sprintf("r%d/w%d", v.NumReads(), v.NumWrites())
+	case Ptr:
+		return "→" + v.Target()
 	case Index:
 		c := v.Children()
 		if len(c) == 1 && c[0] == "" {
