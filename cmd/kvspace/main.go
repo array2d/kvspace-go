@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	"github.com/array2d/kvspace-go"
+	_ "github.com/array2d/kvspace-go/goheap"
 	_ "github.com/array2d/kvspace-go/redis"
+	_ "github.com/array2d/kvspace-go/shm"
 )
 
 func defaultKVSpace() string {
