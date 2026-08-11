@@ -35,8 +35,8 @@ func Conn(addr string) kvspace.KVSpace {
 	}
 	cpath := C.CString(path)
 	defer C.free(unsafe.Pointer(cpath))
-	C.unlink(cpath)
-	ptr := C.kvspace_open(cpath, C.size_t(32768)) // 512KB = 8×2^16
+	// open existing or create new; kvspace_open handles both
+	ptr := C.kvspace_open(cpath, C.size_t(8*64*64*64)) // 2MB
 	if ptr == nil {
 		panic(fmt.Sprintf("shm: cannot open %s", path))
 	}
@@ -54,8 +54,8 @@ func (s *store) getRaw(path string, resolve bool) (kvspace.XValue, bool) {
 	if v == nil || vl == 0 {
 		return kvspace.None{}, false
 	}
+	// v is direct SHM pointer (zero-copy), do NOT free
 	buf := C.GoBytes(unsafe.Pointer(v), vl)
-	C.free(unsafe.Pointer(v))
 	return kvspace.DecodeXValueHead(buf).Decode(), true
 }
 
@@ -90,6 +90,11 @@ func (s *store) Get(prefix string, keys []string, resolve bool) []kvspace.XValue
 func (s *store) Set(pairs []kvspace.KVPair) error {
 	s.mu.Lock(); defer s.mu.Unlock()
 	for _, p := range pairs {
+		// auto-create parent directories
+		parent, _ := kvspace.SepPath(p.Key)
+		if parent != "" && parent != "/" {
+			s.mkindexLocked(parent + "/")
+		}
 		if err := s.setRaw(p.Key, p.Val); err != nil {
 			return err
 		}
@@ -97,12 +102,24 @@ func (s *store) Set(pairs []kvspace.KVPair) error {
 	return nil
 }
 
+func (s *store) mkindexLocked(path string) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	for i := 1; i <= len(parts); i++ {
+		dir := "/" + strings.Join(parts[:i], "/") + "/"
+		if _, ok := s.getRaw(dir, false); !ok {
+			ck := C.CString(dir); C.kvspace_mkindex(s.ptr, ck); C.free(unsafe.Pointer(ck))
+		}
+	}
+}
+
 func (s *store) List(prefix string, expandExt bool, resolve bool) []string {
 	s.mu.RLock(); defer s.mu.RUnlock()
 	ck := C.CString(prefix); defer C.free(unsafe.Pointer(ck))
 	var names **C.char
 	var count C.int32_t
-	C.kvspace_list(s.ptr, ck, C.bool(expandExt), &names, &count)
+	var cResolve C.int
+	if resolve { cResolve = 1 }
+	C.kvspace_list(s.ptr, ck, C.bool(expandExt), cResolve, &names, &count)
 	result := make([]string, 0, int(count))
 	for i := 0; i < int(count); i++ {
 		ptr := (**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(names)) + uintptr(i)*unsafe.Sizeof(*names)))
@@ -187,7 +204,6 @@ func (s *store) Watch(key string, timeout time.Duration) kvspace.XValue {
 		return kvspace.None{}
 	}
 	buf := C.GoBytes(unsafe.Pointer(v), vl)
-	C.free(unsafe.Pointer(v))
 	return kvspace.DecodeXValueHead(buf).Decode()
 }
 
