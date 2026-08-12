@@ -14,7 +14,14 @@ func NewIndex(children []string) Index { return Index{childs: children} }
 func (v Index) Kind() string    { return KindIndex }
 
 func (v Index) IsPtr() bool	{ return false }
-func (v Index) String() string  { return fmt.Sprintf("(%d)", len(v.childs)) }
+func (v Index) String() string       { return fmt.Sprintf("(%d)", len(v.childs)) }
+func (v Index) ValueString() string {
+	if len(v.childs) == 1 && v.childs[0] == "" {
+		return "(empty)"
+	}
+	return fmt.Sprintf("(%d)", len(v.childs))
+}
+func (v Index) CodeString() string { return v.ValueString() + ":" + KindIndex }
 func (v Index) ByteLen() int32  { return int32(len([]byte(strings.Join(v.childs, IndexValueSep)))) }
 func (v Index) ArrayLen() int32 { return 1 }
 func (v Index) Encode() []byte  { return TLVEncode(KindIndex, []byte(strings.Join(v.childs, IndexValueSep)), 1) }
@@ -43,7 +50,17 @@ func NewExtIndex(children []string, extpath string) ExtIndex {
 func (v ExtIndex) Kind() string    { return KindExtIndex }
 
 func (v ExtIndex) IsPtr() bool	{ return false }
-func (v ExtIndex) String() string  { return fmt.Sprintf("(%d) …%s", len(v.childs), v.extpath) }
+func (v ExtIndex) String() string { return fmt.Sprintf("(%d) …%s", len(v.childs), v.extpath) }
+func (v ExtIndex) ValueString() string {
+	if v.extpath != "" {
+		return fmt.Sprintf("(%d) …%s", len(v.childs), v.extpath)
+	}
+	if len(v.childs) == 0 {
+		return "(empty ext)"
+	}
+	return fmt.Sprintf("(%d)", len(v.childs))
+}
+func (v ExtIndex) CodeString() string { return v.ValueString() + ":" + KindExtIndex }
 func (v ExtIndex) ByteLen() int32 {
 	body := encodeExtIndexRaw(v.extpath, v.childs)
 	return int32(len(body))

@@ -1,6 +1,10 @@
 package kvspace
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"fmt"
+	"strings"
+)
 
 // XValueHead 是 TLV 解析后的纯数据头。
 // TLV 头部第一字节 bit7 = isptr，bit6-0 = kind_len。
@@ -74,7 +78,8 @@ type XValue interface {
 	Encode() []byte  // 完整 TLV 编码：[1B kind_len][N B kind][1B isptr][4B arraylen LE][4B raw_len LE][M B raw]
 	ByteLen() int32  // 数据字节长度
 	ArrayLen() int32 // None=0, scalar=1, array=N
-	String() string  // 纯值，无 kind 前缀（fmt.Stringer）
+	ValueString() string
+	CodeString() string
 }
 
 // ── None ─────────────────────────────────────────────────────────────────
@@ -86,7 +91,8 @@ func (None) IsPtr() bool      { return false }
 func (None) Encode() []byte  { return nil }
 func (None) ByteLen() int32  { return 0 }
 func (None) ArrayLen() int32 { return 0 }
-func (None) String() string  { return "" }
+func (None) ValueString() string { return KindNone }
+func (None) CodeString() string { return KindNone }
 
 func IsNone(v XValue) bool {
 	if v == nil {
@@ -111,11 +117,13 @@ func NewPtr(kind, target string, arraylen int32) Ptr {
 
 func (v Ptr) Kind() string    { return v.kind }
 func (v Ptr) IsPtr() bool      { return v.isptr }
-func (v Ptr) String() string  { return "→" + v.target }
 func (v Ptr) ByteLen() int32  { return int32(len(v.target)) }
 func (v Ptr) ArrayLen() int32 { return v.arraylen }
 func (v Ptr) Encode() []byte  { return TLVEncodePtr(v.kind, []byte(v.target), v.arraylen) }
 func (v Ptr) Target() string  { return v.target }
+
+func (v Ptr) ValueString() string { return "→" + v.target }
+func (v Ptr) CodeString() string  { return fmt.Sprintf("→%s:%s", v.Target(), v.Kind()) }
 
 func IsPtr(v XValue) bool {
 	if v == nil { return false }
@@ -182,12 +190,23 @@ func Format(v XValue) string {
 	if IsNone(v) {
 		return KindNone
 	}
-	return fmtKindVal(v)
+	return v.CodeString()
 }
 
 func Plain(v XValue) string {
 	if IsNone(v) {
 		return KindNone
 	}
-	return fmtPlain(v)
+	return v.ValueString()
+}
+
+func fmtArray(n int, fn func(int) string) string {
+	if n == 1 {
+		return fn(0)
+	}
+	parts := make([]string, n)
+	for i := 0; i < n; i++ {
+		parts[i] = fn(i)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }

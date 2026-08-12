@@ -20,7 +20,9 @@ func NewRwir(numReads, numWrites int32, sig string) Rwir {
 func (v Rwir) Kind() string    { return KindRwir }
 
 func (v Rwir) IsPtr() bool	{ return false }
-func (v Rwir) String() string  { return v.Sig() }
+func (v Rwir) String() string       { return v.Sig() }
+func (v Rwir) ValueString() string  { return v.Sig() }
+func (v Rwir) CodeString() string   { return v.Sig() + ":" + KindRwir }
 func (v Rwir) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Rwir) ArrayLen() int32 { return 1 }
 func (v Rwir) Encode() []byte  { return TLVEncode(KindRwir, v.xvaluebody, 1) }
@@ -58,7 +60,9 @@ func NewRwfunc(numInsts, numReads, numWrites int32) Rwfunc {
 func (v Rwfunc) Kind() string    { return KindRwfunc }
 
 func (v Rwfunc) IsPtr() bool	{ return false }
-func (v Rwfunc) String() string  { return "" }
+func (v Rwfunc) String() string       { return "" }
+func (v Rwfunc) ValueString() string  { return fmt.Sprintf("r%d/w%d", v.NumReads(), v.NumWrites()) }
+func (v Rwfunc) CodeString() string   { return v.ValueString() + ":" + KindRwfunc }
 func (v Rwfunc) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Rwfunc) ArrayLen() int32 { return v.al }
 func (v Rwfunc) Encode() []byte  { return TLVEncode(KindRwfunc, v.xvaluebody, v.al) }
