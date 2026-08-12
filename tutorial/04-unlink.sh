@@ -17,9 +17,9 @@ $KV deltree /base/
 echo "=== unlink link ==="
 $KV set /tgt/ index:
 $KV set /tgt/x int:1
-$KV link /tgt/ /lnk/
+$KV set /lnk "*index:/tgt/"
 $KV get /lnk/x
-$KV unlink /lnk
+$KV del /lnk
 $KV get /lnk
 $KV get /tgt/x
 
@@ -28,9 +28,8 @@ $KV set /base/ index:
 $KV set /base/a int:2
 $KV extindex /merge/ /base/
 $KV set /merge/b int:3
-$KV unlink /merge
+$KV delextindex /merge/
 $KV get /merge
 $KV get /base/a
-
 
 

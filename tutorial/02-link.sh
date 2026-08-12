@@ -31,7 +31,7 @@ $KV set /tgt/ index:
 $KV set /tgt/x int:42
 $KV set /tgt/y int:7
 $KV set /tgt/z string:hello
-$KV link /tgt/ /lnk/
+$KV set /lnk "*index:/tgt/"
 
 echo "=== read through ==="
 $KV get /lnk/x /lnk/y
@@ -53,7 +53,5 @@ echo "=== del link body ==="
 $KV del /lnk
 $KV get /lnk
 $KV get /tgt/x
-
-
 
 

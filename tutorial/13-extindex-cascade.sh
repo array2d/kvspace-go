@@ -24,7 +24,7 @@ echo "$out"
 set -e
 echo "Error: extindex cascade prevented"
 
-$KV unlink /mid/
+$KV delextindex /mid/
 $KV extindex /ext/ /base/
 
 echo "=== unlink and recreate ==="

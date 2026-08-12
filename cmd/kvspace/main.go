@@ -10,7 +10,7 @@ import (
 	"github.com/array2d/kvspace-go"
 	_ "github.com/array2d/kvspace-go/goheap"
 	_ "github.com/array2d/kvspace-go/redis"
-	_ "github.com/array2d/kvspace-go/shm"
+	// // _ "github.com/array2d/kvspace-go/shm" // requires libkvspace-c.so // requires libkvspace-c.so
 )
 
 func defaultKVSpace() string {
@@ -25,7 +25,7 @@ func main() {
 	dsn := fs.String("kvspace", defaultKVSpace(), "kvspace DSN (redis://host:port)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvspace [--kvspace dsn] <subcommand> [args]")
-		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mkindex link unlink extindex list|ls array2d tree dump watch notify clear")
+		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mkindex delextindex extindex list|ls array2d tree dump watch notify clear")
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[1:])
@@ -62,7 +62,7 @@ func main() {
 		if len(sub) < 3 {
 			exitUsage("kvspace set <key> <value>")
 		}
-		v, err := kvspace.ParseValue(sub[2])
+		v, err := ParseValue(sub[2])
 		if err != nil {
 			fatalf("%v", err)
 		}
@@ -92,7 +92,7 @@ func main() {
 		}
 	case "delextindex":
 		if len(sub) < 2 {
-			exitUsage("kvspace unlink <path>")
+			exitUsage("kvspace delextindex <path>")
 		}
 		if err := kv.DelExtIndex(sub[1]); err != nil {
 			fatalf("%v", err)
