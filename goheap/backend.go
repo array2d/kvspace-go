@@ -161,6 +161,12 @@ func (b *backend) Set(pairs []kvspace.KVPair) error {
 			if validationErr != nil {
 				break
 			}
+			if ptr, ok := pair.Val.(kvspace.Ptr); ok {
+				if err := kvspace.ValidatePtr(b, ptr.Target(), ptr.Kind(), ptr.ArrayLen()); err != nil {
+					validationErr = err
+					break
+				}
+			}
 		}
 		prepared = append(prepared, preparedPair{key: pair.Key, children: children, dir: dir})
 		if !dir {

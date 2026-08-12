@@ -13,18 +13,18 @@ type KVPair struct {
 //
 // 使用模式：
 //
-//	kv.Set("/vt/0/pc", kvspace.Str("init/[0,0]"))
-//	v := kv.Get("/vt/0", []string{"pc"})[0]; pc := v.Str()
-//	kv.Notify("/vt/0/status", kvspace.Str("running"))
-//	val, _ := kv.Watch("/vt/0/status", 5*time.Second)
+//	kv.Set([]KVPair{{"/vt/0/pc", NewChar("init/[0,0]")}})
+//	v := kv.Get("/vt/0", []string{"pc"}, true)[0]
+//	kv.Notify("/vt/0/status", NewChar("running"))
+//	val := kv.Watch("/vt/0/status", 5*time.Second)
 //
 // Watch/Notify 语义：监听单个 key 的值变化通知，不是通用消息队列。
 //
 //	Notify(key, val) 向等待者投递 val；不等价于 Set（不写持久值）。
-//	Watch(key, timeout) 阻塞等待下一次 Notify；超时返回 (Value{}, ErrNotFound)。
+//	Watch(key, timeout) 阻塞等待下一次 Notify；超时返回 None{}。
 //
-// 软链接透明穿透：Link(target, linkpath) 后，访问 linkpath/x 透明地访问 target/x。
-// 删除语义例外（POSIX rm 式）：Del/DelTree/Unlink 的最终组件作用于链接本体，
+// 软链接透明穿透：Set 写入 Ptr 值（*kind:target）后，访问 /linkpath/x 透明地访问 target/x。
+// 删除语义例外（POSIX rm 式）：Del/DelTree 的最终组件作用于链接本体，
 // 不穿透 target；路径中的祖先链接仍穿透（Del("/alias/x") 删 /real/x）。
 type KVSpace interface {
 	// ── 单点读写 ─────────────────────────────────────────────────────────

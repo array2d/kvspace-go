@@ -222,6 +222,12 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 			}
 		}
 
+		if ptr, ok := val.(kvspace.Ptr); ok {
+			if err := kvspace.ValidatePtr(r, ptr.Target(), ptr.Kind(), ptr.ArrayLen()); err != nil {
+				return err
+			}
+		}
+
 		if isDir(resolved) {
 			parent, name := parentName(resolved)
 			kvspace.MkIndexRecursive(r, parent)

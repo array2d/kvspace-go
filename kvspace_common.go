@@ -4,50 +4,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strconv"
 	"strings"
 )
-
-// ── value parser ─────────────────────────────────────────────────────────
-
-func ParseValue(raw string) (XValue, error) {
-	idx := strings.Index(raw, ":")
-	if idx < 0 {
-		return NewChar(raw), nil
-	}
-	kind, repr := raw[:idx], raw[idx+1:]
-	switch kind {
-	case "int":
-		i, err := strconv.ParseInt(repr, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid int: %q", repr)
-		}
-		return NewInt64(i), nil
-	case "float":
-		f, err := strconv.ParseFloat(repr, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid float: %q", repr)
-		}
-		return NewFloat64(f), nil
-	case "bool":
-		switch repr {
-		case "true":
-			return NewBool(true), nil
-		case "false":
-			return NewBool(false), nil
-		default:
-			return nil, fmt.Errorf("invalid bool: %q", repr)
-		}
-	case "string":
-		return NewChar(repr), nil
-	case "nil":
-		return None{}, nil
-	case KindIndex:
-		return NewIndex(nil), nil
-	default:
-		return nil, fmt.Errorf("unknown kind: %q", kind)
-	}
-}
 
 // ── extindex helpers ──────────────────────────────────────────────────────
 
@@ -449,6 +407,22 @@ func dirExists(kv KVSpace, parentDir, name string) bool {
 		}
 	}
 	return false
+}
+
+// ValidatePtr 检查 Ptr 的 kind/arraylen 与目标值的匹配。
+// 目标不存在则跳过校验；kind 为空则跳过 kind 校验。
+func ValidatePtr(kv KVSpace, target, ptrKind string, ptrArrayLen int32) error {
+	v := GetOne(kv, target)
+	if IsNone(v) {
+		return nil
+	}
+	if ptrKind != "" && v.Kind() != ptrKind {
+		return fmt.Errorf("%w: ptr kind mismatch: target %s is %s, ptr expects %s", ErrLinkTypeMismatch, target, v.Kind(), ptrKind)
+	}
+	if ptrArrayLen > 0 && v.ArrayLen() != ptrArrayLen {
+		return fmt.Errorf("%w: ptr arraylen mismatch: target %s has %d, ptr expects %d", ErrInvalidValue, target, v.ArrayLen(), ptrArrayLen)
+	}
+	return nil
 }
 
 // GetOne 读取单个 key 的便捷方法。
