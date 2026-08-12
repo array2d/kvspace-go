@@ -95,6 +95,12 @@ func (r *redisImpl) readDirIndex(ctx context.Context, dir string) []string {
 			return nil
 		}
 		return c
+	case kvspace.DictIndex:
+		c := v.Children()
+		if len(c) == 1 && c[0] == "" {
+			return nil
+		}
+		return c
 	case kvspace.ExtIndex:
 		return v.Children()
 	default:
@@ -106,7 +112,11 @@ func (r *redisImpl) addChild(ctx context.Context, pipe goredis.Pipeliner, parent
 	data, err := r.rdb.Get(ctx, parent).Bytes()
 	if err != nil {
 		if err == goredis.Nil {
-			pipe.Set(ctx, parent, kvspace.NewIndex([]string{name}).Encode(), 0)
+			if strings.HasSuffix(parent, kvspace.DictSep) {
+				pipe.Set(ctx, parent, kvspace.NewDictIndex([]string{name}).Encode(), 0)
+			} else {
+				pipe.Set(ctx, parent, kvspace.NewIndex([]string{name}).Encode(), 0)
+			}
 			return
 		}
 		panic(fmt.Errorf("%w: addChild %s err=%v", kvspace.ErrGet, parent, err))
@@ -125,6 +135,18 @@ func (r *redisImpl) addChild(ctx context.Context, pipe goredis.Pipeliner, parent
 		}
 		nodes = append(nodes, name)
 		pipe.Set(ctx, parent, kvspace.NewIndex(nodes).Encode(), 0)
+	case kvspace.DictIndex:
+		nodes := v.Children()
+		if len(nodes) == 1 && nodes[0] == "" {
+			nodes = nil
+		}
+		for _, n := range nodes {
+			if n == name {
+				return
+			}
+		}
+		nodes = append(nodes, name)
+		pipe.Set(ctx, parent, kvspace.NewDictIndex(nodes).Encode(), 0)
 	case kvspace.ExtIndex:
 		for _, c := range v.Children() {
 			if c == name {
@@ -160,6 +182,18 @@ func (r *redisImpl) removeChild(ctx context.Context, pipe goredis.Pipeliner, par
 			}
 		}
 		pipe.Set(ctx, parent, kvspace.NewIndex(filtered).Encode(), 0)
+	case kvspace.DictIndex:
+		nodes := v.Children()
+		if len(nodes) == 1 && nodes[0] == "" {
+			nodes = nil
+		}
+		filtered := make([]string, 0, len(nodes))
+		for _, n := range nodes {
+			if n != name && n != name+kvspace.DirIndexSuf {
+				filtered = append(filtered, n)
+			}
+		}
+		pipe.Set(ctx, parent, kvspace.NewDictIndex(filtered).Encode(), 0)
 	case kvspace.ExtIndex:
 		filtered := make([]string, 0, len(v.Children()))
 		for _, c := range v.Children() {
@@ -228,41 +262,49 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 			}
 		}
 
+		var parent, name string
 		if isDir(resolved) {
-			parent, name := parentName(resolved)
+			parent, name = parentName(resolved)
 			kvspace.MkIndexRecursive(r, parent)
 			pipe.Set(ctx, resolved, val.Encode(), 0)
-			children = append(children, childEntry{parent, name + kvspace.DirIndexSuf})
-		} else {
-			parent, name := parentName(resolved)
-			kvspace.MkIndexRecursive(r, parent)
+			children = append(children, childEntry{parent, name + suffixFor(resolved)})
+			continue
+		}
 
-			if data, err := r.rdb.Get(ctx, parent).Bytes(); err == nil {
-				head := kvspace.DecodeXValueHead(data)
-				if head.Kind == kvspace.KindExtIndex {
-					extT := kvspace.DecodeExtIndex(head.Raw).ExtPath()
-					localNodes := r.readDirIndex(ctx, parent)
-					localExists := false
-					for _, n := range localNodes {
-						if n == name {
-							localExists = true
-							break
-						}
+		if sd, m, ok := kvspace.SplitDictParent(r, resolved); ok {
+			parent, name = sd, m
+		} else {
+			parent, name = parentName(resolved)
+		}
+		if !strings.HasSuffix(parent, kvspace.DictSep) {
+			kvspace.MkIndexRecursive(r, parent)
+		}
+
+		if data, err := r.rdb.Get(ctx, parent).Bytes(); err == nil {
+			head := kvspace.DecodeXValueHead(data)
+			if head.Kind == kvspace.KindExtIndex {
+				extT := kvspace.DecodeExtIndex(head.Raw).ExtPath()
+				localNodes := r.readDirIndex(ctx, parent)
+				localExists := false
+				for _, n := range localNodes {
+					if n == name {
+						localExists = true
+						break
 					}
-					if !localExists {
-						extNodes := r.readDirIndex(ctx, extT)
-						for _, n := range extNodes {
-							if n == name {
-								panic(fmt.Errorf("%w: %s", kvspace.ErrExtWrite, resolved))
-							}
+				}
+				if !localExists {
+					extNodes := r.readDirIndex(ctx, extT)
+					for _, n := range extNodes {
+						if n == name {
+							panic(fmt.Errorf("%w: %s", kvspace.ErrExtWrite, resolved))
 						}
 					}
 				}
 			}
-
-			pipe.Set(ctx, resolved, val.Encode(), 0)
-			children = append(children, childEntry{parent, name})
 		}
+
+		pipe.Set(ctx, resolved, val.Encode(), 0)
+		children = append(children, childEntry{parent, name})
 	}
 
 	parentChildren := make(map[string][]string, len(children))
@@ -276,7 +318,7 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 		}
 		var nodes []string
 		var extpath string
-		isExt := false
+		isExt, isDict := false, false
 		if err != goredis.Nil {
 			v := kvspace.DecodeXValueHead(data).Decode()
 			switch v := v.(type) {
@@ -285,6 +327,12 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 				if len(nodes) == 1 && nodes[0] == "" {
 					nodes = nil
 				}
+			case kvspace.DictIndex:
+				nodes = v.Children()
+				if len(nodes) == 1 && nodes[0] == "" {
+					nodes = nil
+				}
+				isDict = true
 			case kvspace.ExtIndex:
 				nodes = v.Children()
 				extpath = v.ExtPath()
@@ -305,6 +353,8 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 		}
 		if isExt {
 			pipe.Set(ctx, parent, kvspace.NewExtIndex(nodes, extpath).Encode(), 0)
+		} else if isDict {
+			pipe.Set(ctx, parent, kvspace.NewDictIndex(nodes).Encode(), 0)
 		} else {
 			pipe.Set(ctx, parent, kvspace.NewIndex(nodes).Encode(), 0)
 		}

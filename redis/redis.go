@@ -46,7 +46,9 @@ type redisImpl struct {
 
 // ── 目录与路径工具 ────────────────────────────────────────────────────────────
 
-func isDir(path string) bool { return strings.HasSuffix(path, kvspace.DirIndexSuf) }
+func isDir(path string) bool {
+	return strings.HasSuffix(path, kvspace.DirIndexSuf) || strings.HasSuffix(path, kvspace.DictSep)
+}
 
 func assertDir(path string) {
 	if path != kvspace.PathSep && !isDir(path) {
@@ -56,13 +58,24 @@ func assertDir(path string) {
 
 func parentName(path string) (string, string) {
 	if isDir(path) && path != kvspace.PathSep {
-		path = path[:len(path)-len(kvspace.DirIndexSuf)]
+		if strings.HasSuffix(path, kvspace.DirIndexSuf) {
+			path = path[:len(path)-len(kvspace.DirIndexSuf)]
+		} else if strings.HasSuffix(path, kvspace.DictSep) {
+			path = path[:len(path)-len(kvspace.DictSep)]
+		}
 	}
 	parent, last := kvspace.SepPath(path)
 	if parent != kvspace.PathSep {
 		parent += kvspace.DirIndexSuf
 	}
 	return parent, last
+}
+
+func suffixFor(path string) string {
+	if strings.HasSuffix(path, kvspace.DictSep) && !strings.HasSuffix(path, kvspace.DirIndexSuf) {
+		return kvspace.DictSep
+	}
+	return kvspace.DirIndexSuf
 }
 
 // resolvePath 解析路径中所有 link，直接 panic 于异常。

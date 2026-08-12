@@ -125,6 +125,9 @@ func (b *backend) Set(pairs []kvspace.KVPair) error {
 		dir      bool
 	}
 	prepared := make([]preparedPair, 0, len(pairs))
+
+	type dictInfo struct{ parent, member string }
+	dictResolutions := make(map[string]dictInfo, len(pairs))
 	var validationErr error
 	for _, pair := range pairs {
 		if err := validateAbsolutePath(pair.Key); err != nil {
@@ -167,6 +170,9 @@ func (b *backend) Set(pairs []kvspace.KVPair) error {
 					break
 				}
 			}
+			if sd, m, ok := kvspace.SplitDictParent(b, pair.Key); ok {
+				dictResolutions[pair.Key] = dictInfo{sd, m}
+			}
 		}
 		prepared = append(prepared, preparedPair{key: pair.Key, children: children, dir: dir})
 		if !dir {
@@ -187,9 +193,16 @@ func (b *backend) Set(pairs []kvspace.KVPair) error {
 			if err := b.checkExtTargetMutationLocked(resolved, indexes, pair.children, pair.dir); err != nil {
 				return err
 			}
-			parent, name := parentName(resolved)
-			if err := b.ensureDirCachedLocked(parent, indexes); err != nil {
-				return err
+			var parent, name string
+			if di, ok := dictResolutions[pair.key]; ok {
+				parent, name = di.parent, di.member
+			} else {
+				parent, name = parentName(resolved)
+			}
+			if !strings.HasSuffix(parent, kvspace.DictSep) {
+				if err := b.ensureDirCachedLocked(parent, indexes); err != nil {
+					return err
+				}
 			}
 			if err := b.checkExtMutationLocked(resolved, kvspace.ErrExtWrite, indexes); err != nil {
 				return err
@@ -660,7 +673,7 @@ func (b *backend) readDirIndexLocked(dir string) []string {
 		return nil
 	}
 	switch v.Kind() {
-	case kvspace.KindIndex:
+	case kvspace.KindIndex, kvspace.KindDict:
 		return normalizeIndex(indexChildren(v))
 	case kvspace.KindExtIndex:
 		children, _ := extIndexParts(v)
@@ -743,13 +756,17 @@ func (b *backend) addChildCachedLocked(parent, name string, indexes indexCache) 
 	}
 	cached, ok := b.indexCachedLocked(parent, indexes)
 	if !ok {
+		kind := kvspace.KindIndex
+		if strings.HasSuffix(parent, kvspace.DictSep) {
+			kind = kvspace.KindDict
+		}
 		cached = &cachedIndex{
-			kind: kvspace.KindIndex,
+			kind: kind,
 			seen: make(map[string]struct{}),
 		}
 		indexes[parent] = cached
 	}
-	if cached.kind != kvspace.KindIndex && cached.kind != kvspace.KindExtIndex {
+	if cached.kind != kvspace.KindIndex && cached.kind != kvspace.KindExtIndex && cached.kind != kvspace.KindDict {
 		panic(fmt.Errorf("%w: %s", kvspace.ErrNotDir, parent))
 	}
 	if _, exists := cached.seen[name]; exists {
@@ -767,6 +784,8 @@ func (b *backend) flushIndexesLocked(indexes indexCache) {
 		}
 		if cached.kind == kvspace.KindExtIndex {
 			b.putValueLocked(path, kvspace.NewExtIndex(cached.children, cached.extPath))
+		} else if cached.kind == kvspace.KindDict {
+			b.putValueLocked(path, kvspace.NewDictIndex(cached.children))
 		} else {
 			b.putValueLocked(path, kvspace.NewIndex(cached.children))
 		}
@@ -784,6 +803,8 @@ func (b *backend) removeChildLocked(parent, name string) {
 	switch v.Kind() {
 	case kvspace.KindIndex:
 		b.putValueLocked(parent, kvspace.NewIndex(without(normalizeIndex(indexChildren(v)), name)))
+	case kvspace.KindDict:
+		b.putValueLocked(parent, kvspace.NewDictIndex(without(normalizeIndex(indexChildren(v)), name)))
 	case kvspace.KindExtIndex:
 		children, target := extIndexParts(v)
 		b.putValueLocked(parent, kvspace.NewExtIndex(without(children, name), target))
@@ -1158,7 +1179,7 @@ func (q *notifyQueue) clear() {
 }
 
 func isDir(path string) bool {
-	return strings.HasSuffix(path, kvspace.DirIndexSuf)
+	return strings.HasSuffix(path, kvspace.DirIndexSuf) || strings.HasSuffix(path, kvspace.DictSep)
 }
 
 func (b *backend) begin() error {
