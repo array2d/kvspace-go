@@ -35,8 +35,12 @@ func (h XValueHead) Decode() XValue {
 		return DecodeInt32(h.Raw)
 	case KindInt64:
 		return DecodeInt64(h.Raw)
+	case KindByte:
+		return DecodeByte(h.Raw)
 	case KindUint8:
 		return DecodeUint8(h.Raw)
+	case KindStringByte:
+		return DecodeStringByte(h.Raw)
 	case KindUint16:
 		return DecodeUint16(h.Raw)
 	case KindUint32:
@@ -49,10 +53,6 @@ func (h XValueHead) Decode() XValue {
 		return DecodeFloat64(h.Raw)
 	case KindBool:
 		return DecodeBool(h.Raw)
-	case KindString:
-		return DecodeChar(h.Raw)
-	case KindBytes:
-		return DecodeBytes(h.Raw)
 	case "time":
 		return DecodeTime(h.Raw)
 	case "duration":
@@ -190,10 +190,13 @@ func DecodeXValueHead(data []byte) XValueHead {
 
 // ── element ops ──────────────────────────────────────────────────────────
 
-// ElemSize 返回 kind 的单元素字节数；≤0 表示非定长类型。
+// IsByteDerived 判断 kind 是否继承 byte（定长元素类型）。
+func IsByteDerived(kind string) bool { return ElemSize(kind) > 0 }
+
+// ElemSize 返回 kind 的单元素字节数；≤0 表示非定长类型（非 byte 派生）。
 func ElemSize(kind string) int32 {
 	switch kind {
-	case KindInt8, KindUint8, KindBool:
+	case KindByte, KindInt8, KindUint8, KindStringByte, KindBool:
 		return 1
 	case KindInt16, KindUint16:
 		return 2
@@ -216,8 +219,12 @@ func SliceElem(kind string, raw []byte, idx int32) XValue {
 	}
 	off := int(idx) * es
 	switch kind {
+	case KindByte:
+		return NewByte(raw[off])
 	case KindInt8:
 		return NewInt8(int8(raw[off]))
+	case KindStringByte:
+		return NewStringByte(raw[off])
 	case KindInt16:
 		return NewInt16(int16(binary.LittleEndian.Uint16(raw[off:])))
 	case KindInt32:
