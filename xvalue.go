@@ -3,6 +3,7 @@ package kvspace
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -185,6 +186,78 @@ func DecodeXValueHead(data []byte) XValueHead {
 	raw := make([]byte, rawLen)
 	copy(raw, data[start:start+int(rawLen)])
 	return XValueHead{Kind: kind, IsPtr: isPtr, ArrayLen: arraylen, Raw: raw}
+}
+
+// ── element ops ──────────────────────────────────────────────────────────
+
+// ElemSize 返回 kind 的单元素字节数；≤0 表示非定长类型。
+func ElemSize(kind string) int32 {
+	switch kind {
+	case KindInt8, KindUint8, KindBool:
+		return 1
+	case KindInt16, KindUint16:
+		return 2
+	case KindInt32, KindUint32, KindFloat32:
+		return 4
+	case KindInt64, KindUint64, KindFloat64, "time", "duration":
+		return 8
+	}
+	return 0
+}
+
+// SliceElem 返回 raw 中第 idx 个元素的标量 XValue。idx 越界返 None。
+func SliceElem(kind string, raw []byte, idx int32) XValue {
+	if idx < 0 {
+		return None{}
+	}
+	es := int(ElemSize(kind))
+	if es <= 0 || int(idx)*es+es > len(raw) {
+		return None{}
+	}
+	off := int(idx) * es
+	switch kind {
+	case KindInt8:
+		return NewInt8(int8(raw[off]))
+	case KindInt16:
+		return NewInt16(int16(binary.LittleEndian.Uint16(raw[off:])))
+	case KindInt32:
+		return NewInt32(int32(binary.LittleEndian.Uint32(raw[off:])))
+	case KindInt64:
+		return NewInt64(int64(binary.LittleEndian.Uint64(raw[off:])))
+	case KindUint8:
+		return NewUint8(raw[off])
+	case KindUint16:
+		return NewUint16(binary.LittleEndian.Uint16(raw[off:]))
+	case KindUint32:
+		return NewUint32(binary.LittleEndian.Uint32(raw[off:]))
+	case KindUint64:
+		return NewUint64(binary.LittleEndian.Uint64(raw[off:]))
+	case KindFloat32:
+		return NewFloat32(math.Float32frombits(binary.LittleEndian.Uint32(raw[off:])))
+	case KindFloat64:
+		return NewFloat64(math.Float64frombits(binary.LittleEndian.Uint64(raw[off:])))
+	case KindBool:
+		return NewBool(raw[off] != 0)
+	case "time":
+		return NewTime(int64(binary.LittleEndian.Uint64(raw[off:])))
+	case "duration":
+		return NewDuration(int64(binary.LittleEndian.Uint64(raw[off:])))
+	}
+	return None{}
+}
+
+// WriteElem 将 val 的 Encode 首段写入 raw[idx*es] 位置。调用者保证 es>0 且不越界。
+func WriteElem(kind string, raw []byte, idx int32, val XValue) {
+	es := int(ElemSize(kind))
+	off := int(idx) * es
+	copy(raw[off:off+es], val.Encode()[1+len(kind)+1+4+4:])
+}
+
+func EncodeRaw(kind string, isptr bool, raw []byte, arraylen int32) []byte {
+	if isptr {
+		return TLVEncodePtr(kind, raw, arraylen)
+	}
+	return TLVEncode(kind, raw, arraylen)
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────
