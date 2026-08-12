@@ -37,6 +37,7 @@ var (
 
 const (
 	KindNone      = "None"
+	DictSep       = "."
 	KindBool      = "bool"
 	KindInt8      = "int8"
 	KindInt16     = "int16"

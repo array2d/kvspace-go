@@ -36,6 +36,41 @@ func DecodeIndex(xvaluebody []byte) Index {
 	return Index{childs: strings.Split(s, IndexValueSep)}
 }
 
+// ── DictIndex ──────────────────────────────────────────────────────────
+
+type DictIndex struct{ childs []string }
+
+func NewDictIndex(children []string) DictIndex { return DictIndex{childs: children} }
+
+func (v DictIndex) Kind() string    { return KindDict }
+func (v DictIndex) IsPtr() bool     { return false }
+func (v DictIndex) String() string  { return fmt.Sprintf("{%d}", len(v.childs)) }
+
+func (v DictIndex) ValueString() string {
+	if len(v.childs) == 1 && v.childs[0] == "" {
+		return "{empty}"
+	}
+	return fmt.Sprintf("{%d}", len(v.childs))
+}
+func (v DictIndex) CodeString() string { return v.ValueString() + ":" + KindDict }
+func (v DictIndex) ByteLen() int32 {
+	return int32(len([]byte(strings.Join(v.childs, IndexValueSep))))
+}
+func (v DictIndex) ArrayLen() int32 { return 1 }
+func (v DictIndex) Encode() []byte {
+	return TLVEncode(KindDict, []byte(strings.Join(v.childs, IndexValueSep)), 1)
+}
+
+func (v DictIndex) Children() []string { return v.childs }
+
+func DecodeDictIndex(xvaluebody []byte) DictIndex {
+	s := string(xvaluebody)
+	if s == "" {
+		return DictIndex{}
+	}
+	return DictIndex{childs: strings.Split(s, IndexValueSep)}
+}
+
 // ── ExtIndex ─────────────────────────────────────────────────────────────
 
 type ExtIndex struct {
