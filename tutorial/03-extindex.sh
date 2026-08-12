@@ -5,10 +5,10 @@
 # /merge/b	int64:2
 # /merge/c	int64:3
 # === write new key ===
-# /merge/z	string:upper_only
+# /merge/z	stringbyte:upper_only
 # /base/z	(nil)
 # === list merge ===
-# z	string	upper_only
+# z	stringbyte	upper_only
 # a	int64	1
 # b	int64	2
 # c	int64	3

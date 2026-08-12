@@ -5,17 +5,17 @@
 # === Set & List ===
 # a	int64	42
 # b	int64	7
-# c	string	hello
+# c	stringbyte	hello
 # === Get bulk ===
 # /t01/a	int64:42
 # /t01/b	int64:7
-# /t01/c	string:hello
+# /t01/c	stringbyte:hello
 # === Get nil ===
 # /t01/nonexist	(nil)
 # === Del ===
 # /t01/a	(nil)
 # b	int64	7
-# c	string	hello
+# c	stringbyte	hello
 # /end
 
 set -e

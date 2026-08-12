@@ -2,7 +2,7 @@
 # expected:
 # === overwrite kind ===
 # /e/v	int64:42
-# /e/v	string:hello
+# /e/v	stringbyte:hello
 # === empty list ===
 # === del non-existent ===
 # /e/ghost	(nil)

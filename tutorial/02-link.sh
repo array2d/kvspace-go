@@ -6,17 +6,17 @@
 # === list through ===
 # x	int64	42
 # y	int64	7
-# z	string	hello
+# z	stringbyte	hello
 # === write through ===
 # /tgt/w	int64:99
 # x	int64	42
 # y	int64	7
-# z	string	hello
+# z	stringbyte	hello
 # w	int64	99
 # === del through link ===
 # /tgt/y	(nil)
 # x	int64	42
-# z	string	hello
+# z	stringbyte	hello
 # w	int64	99
 # === del link body ===
 # /lnk	(nil)

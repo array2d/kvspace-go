@@ -12,9 +12,9 @@
 # /t/yes	bool:true
 # /t/no	bool:false
 # === string ===
-# /t/empty	string:
-# /t/space	string:hello world
-# /t/unicode	string:你好
+# /t/empty	stringbyte:
+# /t/space	stringbyte:hello world
+# /t/unicode	stringbyte:你好
 # === nil ===
 # /t/nothing	(nil)
 # /end
