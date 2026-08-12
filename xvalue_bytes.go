@@ -18,7 +18,9 @@ func NewBytes(v ...[]byte) Bytes {
 func (v Bytes) Kind() string   { return KindBytes }
 
 func (v Bytes) IsPtr() bool	{ return false }
-func (v Bytes) String() string { return string(v.xvaluebody) }
+func (v Bytes) String() string       { return string(v.xvaluebody) }
+func (v Bytes) ValueString() string  { return string(v.xvaluebody) }
+func (v Bytes) CodeString() string   { return KindBytes + ":" + v.ValueString() }
 func (v Bytes) ByteLen() int32 { return int32(len(v.xvaluebody)) }
 func (v Bytes) ArrayLen() int32 {
 	c := 0

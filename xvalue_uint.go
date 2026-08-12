@@ -15,7 +15,9 @@ func NewUint8(v ...uint8) Uint8 { return Uint8{data: v} }
 func (v Uint8) Kind() string    { return KindUint8 }
 
 func (v Uint8) IsPtr() bool	{ return false }
-func (v Uint8) String() string  { return fmtArray(len(v.data), func(i int) string { return strconv.FormatUint(uint64(v.data[i]), 10) }) }
+func (v Uint8) String() string       { return fmtArray(len(v.data), func(i int) string { return strconv.FormatUint(uint64(v.data[i]), 10) }) }
+func (v Uint8) ValueString() string  { return strconv.FormatUint(uint64(v.At(0)), 10) }
+func (v Uint8) CodeString() string   { return KindUint8 + ":" + v.ValueString() }
 func (v Uint8) ByteLen() int32  { return int32(len(v.data)) }
 func (v Uint8) ArrayLen() int32 { return int32(len(v.data)) }
 func (v Uint8) Encode() []byte {
@@ -47,7 +49,9 @@ func NewUint16(v ...uint16) Uint16 { return Uint16{data: v} }
 func (v Uint16) Kind() string    { return KindUint16 }
 
 func (v Uint16) IsPtr() bool	{ return false }
-func (v Uint16) String() string  { return fmtArray(len(v.data), func(i int) string { return strconv.FormatUint(uint64(v.data[i]), 10) }) }
+func (v Uint16) String() string       { return fmtArray(len(v.data), func(i int) string { return strconv.FormatUint(uint64(v.data[i]), 10) }) }
+func (v Uint16) ValueString() string  { return strconv.FormatUint(uint64(v.At(0)), 10) }
+func (v Uint16) CodeString() string   { return KindUint16 + ":" + v.ValueString() }
 func (v Uint16) ByteLen() int32  { return int32(len(v.data) * 2) }
 func (v Uint16) ArrayLen() int32 { return int32(len(v.data)) }
 func (v Uint16) Encode() []byte {
@@ -81,7 +85,9 @@ func NewUint32(v ...uint32) Uint32 { return Uint32{data: v} }
 func (v Uint32) Kind() string    { return KindUint32 }
 
 func (v Uint32) IsPtr() bool	{ return false }
-func (v Uint32) String() string  { return fmtArray(len(v.data), func(i int) string { return strconv.FormatUint(uint64(v.data[i]), 10) }) }
+func (v Uint32) String() string       { return fmtArray(len(v.data), func(i int) string { return strconv.FormatUint(uint64(v.data[i]), 10) }) }
+func (v Uint32) ValueString() string  { return strconv.FormatUint(uint64(v.At(0)), 10) }
+func (v Uint32) CodeString() string   { return KindUint32 + ":" + v.ValueString() }
 func (v Uint32) ByteLen() int32  { return int32(len(v.data) * 4) }
 func (v Uint32) ArrayLen() int32 { return int32(len(v.data)) }
 func (v Uint32) Encode() []byte {
@@ -115,7 +121,9 @@ func NewUint64(v ...uint64) Uint64 { return Uint64{data: v} }
 func (v Uint64) Kind() string    { return KindUint64 }
 
 func (v Uint64) IsPtr() bool	{ return false }
-func (v Uint64) String() string  { return fmtArray(len(v.data), func(i int) string { return strconv.FormatUint(v.data[i], 10) }) }
+func (v Uint64) String() string       { return fmtArray(len(v.data), func(i int) string { return strconv.FormatUint(v.data[i], 10) }) }
+func (v Uint64) ValueString() string  { return strconv.FormatUint(v.At(0), 10) }
+func (v Uint64) CodeString() string   { return KindUint64 + ":" + v.ValueString() }
 func (v Uint64) ByteLen() int32  { return int32(len(v.data) * 8) }
 func (v Uint64) ArrayLen() int32 { return int32(len(v.data)) }
 func (v Uint64) Encode() []byte {

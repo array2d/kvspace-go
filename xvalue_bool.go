@@ -14,7 +14,9 @@ func NewBool(v ...bool) Bool { return Bool{data: v} }
 func (v Bool) Kind() string    { return KindBool }
 
 func (v Bool) IsPtr() bool	{ return false }
-func (v Bool) String() string  { return fmtArray(len(v.data), func(i int) string { return strconv.FormatBool(v.data[i]) }) }
+func (v Bool) String() string       { return fmtArray(len(v.data), func(i int) string { return strconv.FormatBool(v.data[i]) }) }
+func (v Bool) ValueString() string  { return strconv.FormatBool(v.At(0)) }
+func (v Bool) CodeString() string   { return KindBool + ":" + v.ValueString() }
 func (v Bool) ByteLen() int32  { return int32(len(v.data)) }
 func (v Bool) ArrayLen() int32 { return int32(len(v.data)) }
 func (v Bool) Encode() []byte {

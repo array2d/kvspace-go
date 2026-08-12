@@ -4,7 +4,17 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 )
+
+func fmtFloat(v float64, bitSize int) string {
+	s := strconv.FormatFloat(v, 'f', -1, bitSize)
+	if !strings.Contains(s, ".") {
+		s += ".0"
+	}
+	return s
+}
 
 // ── Float32 ──────────────────────────────────────────────────────────────
 
@@ -15,7 +25,9 @@ func NewFloat32(v ...float32) Float32 { return Float32{data: v} }
 func (v Float32) Kind() string    { return KindFloat32 }
 
 func (v Float32) IsPtr() bool	{ return false }
-func (v Float32) String() string  { return fmtArray(len(v.data), func(i int) string { return fmtFloat(float64(v.data[i]), 32) }) }
+func (v Float32) String() string       { return fmtArray(len(v.data), func(i int) string { return fmtFloat(float64(v.data[i]), 32) }) }
+func (v Float32) ValueString() string  { return fmtFloat(float64(v.At(0)), 32) }
+func (v Float32) CodeString() string   { return KindFloat32 + ":" + v.ValueString() }
 func (v Float32) ByteLen() int32  { return int32(len(v.data) * 4) }
 func (v Float32) ArrayLen() int32 { return int32(len(v.data)) }
 func (v Float32) Encode() []byte {
@@ -49,7 +61,9 @@ func NewFloat64(v ...float64) Float64 { return Float64{data: v} }
 func (v Float64) Kind() string    { return KindFloat64 }
 
 func (v Float64) IsPtr() bool	{ return false }
-func (v Float64) String() string  { return fmtArray(len(v.data), func(i int) string { return fmtFloat(v.data[i], 64) }) }
+func (v Float64) String() string       { return fmtArray(len(v.data), func(i int) string { return fmtFloat(v.data[i], 64) }) }
+func (v Float64) ValueString() string  { return fmtFloat(v.At(0), 64) }
+func (v Float64) CodeString() string   { return KindFloat64 + ":" + v.ValueString() }
 func (v Float64) ByteLen() int32  { return int32(len(v.data) * 8) }
 func (v Float64) ArrayLen() int32 { return int32(len(v.data)) }
 func (v Float64) Encode() []byte {
