@@ -39,17 +39,16 @@ const (
 	KindNone = "None"
 	DictSep  = "."
 
-	// kind 继承树：byte 是所有定长数值类型的祖先。
-	// 字节宽度由 ElemSize(kind) 定义——任何 elemSize>0 的 kind 继承 byte。
-	KindByte       = "byte"       // 基础字节，elemSize=1
-	KindBool       = "bool"       // → byte, 1B
-	KindInt8       = "int8"       // → byte, 1B
-	KindUint8      = "uint8"      // → byte, 1B
-	KindStringByte = "stringbyte" // → byte, 1B×N (UTF-8)
-	KindInt16      = "int16"      // → byte, 2B
-	KindUint16     = "uint16"     // → byte, 2B
-	KindInt32      = "int32"      // → byte, 4B
-	KindUint32     = "uint32"     // → byte, 4B
+	// kind 继承树：uint8 是所有定长数值类型的祖先。
+	// 字节宽度由 ElemSize(kind) 定义——任何 elemSize>0 的 kind 继承 uint8。
+	KindBool       = "bool"       // → uint8, 1B
+	KindInt8       = "int8"       // → uint8, 1B
+	KindUint8      = "uint8"      // 基础字节，1B
+	KindStringByte = "stringbyte" // → uint8, 1B×N (UTF-8)
+	KindInt16      = "int16"      // → uint8, 2B
+	KindUint16     = "uint16"     // → uint8, 2B
+	KindInt32      = "int32"      // → uint8, 4B
+	KindUint32     = "uint32"     // → uint8, 4B
 	KindFloat32    = "float32"    // → byte, 4B
 	KindInt64      = "int64"      // → byte, 8B
 	KindUint64     = "uint64"     // → byte, 8B
