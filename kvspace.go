@@ -46,9 +46,8 @@ type KVSpace interface {
 	Mkindex(path string) error // 递归创建目录，类似 mkdir -p；path 须以 / 结尾
 
 	// ── mount系统 ───────────────────────────────────────────────────────────
-	Link(target, linkpath string) error  // 创建路径映射 linkpath → target，纯链接
-	ExtIndex(path, extpath string) error // 创建扩展索引，path 为写层，extpath 为只读扩展
-	UnLink(path string) error            // 移除 extindex
+ExtIndex(path, extpath string) error // 创建扩展索引，path 为写层，extpath 为只读扩展
+	DelExtIndex(path string) error            // 移除 extindex
 
 	// ── 生命周期 ─────────────────────────────────────────────────────────
 	// 范围警示：redis 实现 = FLUSHDB，清空所在 db 的全部键——共享 Redis 实例时会波及非 kvlang 数据。

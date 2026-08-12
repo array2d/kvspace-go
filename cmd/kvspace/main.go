@@ -90,18 +90,11 @@ func main() {
 		if err := kv.Mkindex(sub[1]); err != nil {
 			fatalf("%v", err)
 		}
-	case "link":
-		if len(sub) < 3 {
-			exitUsage("kvspace link <target> <linkpath>")
-		}
-		if err := kv.Link(sub[1], sub[2]); err != nil {
-			fatalf("%v", err)
-		}
-	case "unlink":
+	case "delextindex":
 		if len(sub) < 2 {
 			exitUsage("kvspace unlink <path>")
 		}
-		if err := kv.UnLink(sub[1]); err != nil {
+		if err := kv.DelExtIndex(sub[1]); err != nil {
 			fatalf("%v", err)
 		}
 	case "extindex":

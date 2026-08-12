@@ -53,7 +53,6 @@ const (
 	KindArray1d   = "array1d"
 	KindDict      = "dict"
 	KindIndex     = "index"
-	KindLinkIndex = "linkindex" // 纯链接，写穿透到目标
 	KindExtIndex  = "extindex"  // 扩展索引，写留在上层
 
 	KindRwir   = "rwir"   // 原子读写指令槽

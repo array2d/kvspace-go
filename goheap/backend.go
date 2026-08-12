@@ -12,8 +12,6 @@ import (
 	"github.com/array2d/kvspace-go"
 )
 
-const maxLinkResolutions = 64
-
 func init() { kvspace.Register("goheap", Conn) }
 
 var (
@@ -157,7 +155,7 @@ func (b *backend) Set(pairs []kvspace.KVPair) error {
 			}
 		} else {
 			switch stored.Kind() {
-			case kvspace.KindIndex, kvspace.KindLinkIndex, kvspace.KindExtIndex:
+			case kvspace.KindIndex, kvspace.KindExtIndex:
 				validationErr = fmt.Errorf("%w: %s has reserved kind=%s", kvspace.ErrInvalidValue, pair.Key, stored.Kind())
 			}
 			if validationErr != nil {
@@ -272,7 +270,7 @@ func (b *backend) DelTree(prefix string) error {
 	defer b.store.mu.Unlock()
 
 	finalPath := b.resolveParentLocked(prefix)
-	if v, ok := b.valueLocked(finalPath); ok && v.Kind() == kvspace.KindLinkIndex {
+	if v, ok := b.valueLocked(finalPath); ok && v.IsPtr() {
 		return b.delLocked(prefix)
 	}
 
@@ -298,8 +296,7 @@ func (b *backend) DelTree(prefix string) error {
 			data, _ := b.store.tree.Get(key)
 			savedValues[path] = data
 			kind, _, _ := encodedValueParts(data)
-			validate = validate || bytes.Equal(kind, []byte(kvspace.KindIndex)) ||
-				bytes.Equal(kind, []byte(kvspace.KindLinkIndex))
+			validate = validate || bytes.Equal(kind, []byte(kvspace.KindIndex))
 			if extPath, ok := b.store.exts[path]; ok {
 				savedExts[path] = extPath
 			}
@@ -387,59 +384,7 @@ func (b *backend) Mkindex(path string) error {
 	return b.ensureDirLocked(b.resolvePathLocked(path))
 }
 
-func (b *backend) Link(target, linkpath string) error {
-	if err := b.begin(); err != nil {
-		return err
-	}
-	defer b.end()
-	if err := validateAbsolutePath(target); err != nil {
-		return err
-	}
-	if err := validateAbsolutePath(linkpath); err != nil {
-		return err
-	}
-	if isDir(target) != isDir(linkpath) {
-		return fmt.Errorf("%w: %s → %s", kvspace.ErrLinkTypeMismatch, target, linkpath)
-	}
-
-	b.store.mu.Lock()
-	defer b.store.mu.Unlock()
-	resolved := b.resolveParentLocked(linkpath)
-	parent, name := parentName(resolved)
-	if err := b.checkExtMutationLocked(resolved, kvspace.ErrExtWrite, nil); err != nil {
-		return err
-	}
-	if value, ok := b.valueLocked(resolved); ok && value.Kind() != kvspace.KindLinkIndex {
-		return fmt.Errorf("%w: %s", kvspace.ErrLinkPathExists, resolved)
-	}
-	oldValue, hadOldValue := b.store.tree.Get([]byte(resolved))
-	b.putValueLocked(resolved, kvspace.NewLinkIndex(target))
-	restore := func() {
-		if hadOldValue {
-			b.store.tree.Insert([]byte(resolved), oldValue)
-		} else {
-			b.store.tree.Delete([]byte(resolved))
-		}
-	}
-	if _, err := b.resolvePathErrLocked(resolved); err != nil {
-		restore()
-		return err
-	}
-	if err := b.validateExtTargetsLocked(); err != nil {
-		restore()
-		return err
-	}
-	if err := b.canEnsureDirLocked(parent); err != nil {
-		restore()
-		return err
-	}
-	if err := b.ensureDirLocked(parent); err != nil {
-		restore()
-		return err
-	}
-	b.addChildLocked(parent, indexChild(resolved, name))
-	return nil
-}
+// Link removed — use kv.Set(path, NewPtr("", target, 1))
 
 func (b *backend) ExtIndex(path, extpath string) error {
 	if err := b.begin(); err != nil {
@@ -505,7 +450,7 @@ func (b *backend) ExtIndex(path, extpath string) error {
 	return nil
 }
 
-func (b *backend) UnLink(path string) error {
+func (b *backend) DelExtIndex(path string) error {
 	if err := b.begin(); err != nil {
 		return err
 	}
@@ -517,10 +462,6 @@ func (b *backend) UnLink(path string) error {
 	defer b.store.mu.Unlock()
 
 	resolved := b.resolveParentLocked(path)
-	if v, ok := b.valueLocked(resolved); ok && v.Kind() == kvspace.KindLinkIndex {
-		return b.delResolvedLocked(resolved)
-	}
-
 	if v, ok := b.valueLocked(resolved); ok && v.Kind() == kvspace.KindExtIndex {
 		children, _ := extIndexParts(v)
 		b.putValueLocked(resolved, kvspace.NewIndex(children))
@@ -584,7 +525,7 @@ func (b *backend) delResolvedLocked(resolved string) error {
 	delete(b.store.exts, resolved)
 	if protectExts && hadValue && len(b.store.exts) != 0 {
 		kind, _, _ := encodedValueParts(oldValue)
-		if bytes.Equal(kind, []byte(kvspace.KindIndex)) || bytes.Equal(kind, []byte(kvspace.KindLinkIndex)) {
+		if bytes.Equal(kind, []byte(kvspace.KindIndex)) || false {
 			if err := b.validateExtTargetsLocked(); err != nil {
 				b.store.tree.Insert([]byte(resolved), oldValue)
 				return err
@@ -692,18 +633,6 @@ func (b *backend) valueLocked(key string) (kvspace.XValue, bool) {
 		return nil, false
 	}
 	return kvspace.DecodeXValueHead(data).Decode(), true
-}
-
-func (b *backend) linkTargetLocked(key string) (string, bool) {
-	data, ok := b.store.tree.get([]byte(key))
-	if !ok {
-		return "", false
-	}
-	kind, raw, ok := encodedValueParts(data)
-	if !ok || !bytes.Equal(kind, []byte(kvspace.KindLinkIndex)) {
-		return "", false
-	}
-	return string(raw), true
 }
 
 func (b *backend) valueHasKindLocked(key, want string) bool {
@@ -1088,24 +1017,7 @@ func (b *backend) resolvePathLocked(path string) string {
 	return resolved
 }
 
-func (b *backend) resolvePathErrLocked(path string) (string, error) {
-	seen := make(map[string]struct{}, 4)
-	for hops := 0; ; {
-		if _, exists := seen[path]; exists {
-			return "", fmt.Errorf("%w: link cycle at %s", kvspace.ErrResolve, path)
-		}
-		seen[path] = struct{}{}
-		resolved, changed := b.resolveOneLocked(path)
-		if !changed {
-			return resolved, nil
-		}
-		hops++
-		if hops > maxLinkResolutions {
-			return "", fmt.Errorf("%w: more than %d link resolutions", kvspace.ErrResolve, maxLinkResolutions)
-		}
-		path = resolved
-	}
-}
+func (b *backend) resolvePathErrLocked(path string) (string, error) { return path, nil }
 
 func (b *backend) resolveParentLocked(path string) string {
 	dirSuffix := isDir(path) && path != kvspace.PathSep
@@ -1129,33 +1041,7 @@ func (b *backend) resolveParentLocked(path string) string {
 	return result
 }
 
-func (b *backend) resolveOneLocked(path string) (string, bool) {
-	if path == kvspace.PathSep {
-		return path, false
-	}
-	parts := strings.Split(strings.Trim(path, kvspace.PathSep), kvspace.PathSep)
-	current := kvspace.PathSep
-	for i, part := range parts {
-		current = kvspace.JoinPath(current, part)
-		linkKey := current
-		if i+1 < len(parts) || isDir(path) {
-			linkKey += kvspace.DirIndexSuf
-		}
-		target, ok := b.linkTargetLocked(linkKey)
-		if !ok {
-			continue
-		}
-		if i+1 < len(parts) {
-			resolved := kvspace.JoinPath(target, strings.Join(parts[i+1:], kvspace.PathSep))
-			if isDir(path) && !isDir(resolved) {
-				resolved += kvspace.DirIndexSuf
-			}
-			return resolved, true
-		}
-		return target, true
-	}
-	return path, false
-}
+func (b *backend) resolveOneLocked(path string) (string, bool) { return path, false }
 
 func (b *backend) acquireQueue(key string) *notifyQueue {
 	b.store.queuesMu.Lock()
@@ -1411,11 +1297,11 @@ func encodedValueParts(data []byte) (kind, raw []byte, ok bool) {
 		return nil, nil, false
 	}
 	kindLen := int(data[0])
-	headerLen := 1 + kindLen + 8
+	headerLen := 1 + kindLen + 1 + 8
 	if kindLen == 0 || len(data) < headerLen {
 		return nil, nil, false
 	}
-	rawLen := int(binary.LittleEndian.Uint32(data[1+kindLen+4 : headerLen]))
+	rawLen := int(binary.LittleEndian.Uint32(data[1+kindLen+1+4 : headerLen]))
 	if rawLen < 0 || len(data) < headerLen+rawLen {
 		return nil, nil, false
 	}

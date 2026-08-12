@@ -111,8 +111,8 @@ func (r *redisImpl) resolveOne(ctx context.Context, path string) (string, bool) 
 			panic(fmt.Errorf("%w: %s err=%v", kvspace.ErrResolve, cur, err))
 		}
 		v := kvspace.DecodeXValueHead(data).Decode()
-		if li, ok := v.(kvspace.LinkIndex); ok {
-			target := li.Target()
+		if kvspace.IsPtr(v) {
+			target := kvspace.PtrTarget(v)
 			if i+1 < len(parts) {
 				return kvspace.JoinPath(target, strings.Join(parts[i+1:], kvspace.PathSep)), true
 			}

@@ -179,7 +179,7 @@ func (s *store) ExtIndex(path, extpath string) error {
 	return nil
 }
 
-func (s *store) UnLink(path string) error {
+func (s *store) DelExtIndex(path string) error {
 	s.mu.Lock(); defer s.mu.Unlock()
 	delete(s.exts, path)
 	ck := C.CString(path); defer C.free(unsafe.Pointer(ck))

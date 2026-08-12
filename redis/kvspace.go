@@ -408,7 +408,7 @@ func (r *redisImpl) DelTree(prefix string) error {
 	data, err := r.rdb.Get(ctx, linkKey).Bytes()
 	if err == nil {
 		head := kvspace.DecodeXValueHead(data)
-		if head.Kind == kvspace.KindLinkIndex {
+		if head.IsPtr {
 			return r.Del(prefix)
 		}
 	} else if err != goredis.Nil {
@@ -452,34 +452,7 @@ func (r *redisImpl) Watch(key string, timeout time.Duration) kvspace.XValue {
 	return kvspace.DecodeXValueHead([]byte(results[1])).Decode()
 }
 
-// ── Link ──────────────────────────────────────────────────────────────────────
-
-func (r *redisImpl) Link(target, linkpath string) error {
-	ctx := bg
-
-	if isDir(target) != isDir(linkpath) {
-		return fmt.Errorf("%w: %s → %s", kvspace.ErrLinkTypeMismatch, target, linkpath)
-	}
-
-	resolved := r.resolveParent(ctx, linkpath)
-
-	storeKey := resolved
-	if isDir(storeKey) {
-		storeKey = storeKey[:len(storeKey)-len(kvspace.DirIndexSuf)]
-	}
-
-	parent, name := parentName(resolved)
-	kvspace.MkIndexRecursive(r, parent)
-
-	pipe := r.rdb.Pipeline()
-	pipe.Set(ctx, storeKey, kvspace.NewLinkIndex(target).Encode(), 0)
-	if isDir(resolved) {
-		name += kvspace.DirIndexSuf
-	}
-	r.addChild(ctx, pipe, parent, name)
-	_, err := pipe.Exec(ctx)
-	return err
-}
+// Link removed
 
 // ── ExtIndex ──────────────────────────────────────────────────────────────────
 
@@ -511,7 +484,7 @@ func (r *redisImpl) ExtIndex(path, extpath string) error {
 
 // ── UnLink ────────────────────────────────────────────────────────────────────
 
-func (r *redisImpl) UnLink(path string) error {
+func (r *redisImpl) DelExtIndex(path string) error {
 	ctx := bg
 	resolved := r.resolveParent(ctx, path)
 
@@ -522,7 +495,7 @@ func (r *redisImpl) UnLink(path string) error {
 	data, err := r.rdb.Get(ctx, linkKey).Bytes()
 	if err == nil {
 		head := kvspace.DecodeXValueHead(data)
-		if head.Kind == kvspace.KindLinkIndex {
+		if head.IsPtr {
 			pipe := r.rdb.Pipeline()
 			pipe.Del(ctx, linkKey)
 			parent, name := parentName(resolved)
