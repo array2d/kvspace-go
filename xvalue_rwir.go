@@ -18,6 +18,8 @@ func NewRwir(numReads, numWrites int32, sig string) Rwir {
 }
 
 func (v Rwir) Kind() string    { return KindRwir }
+
+func (v Rwir) IsPtr() bool	{ return false }
 func (v Rwir) String() string  { return v.Sig() }
 func (v Rwir) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Rwir) ArrayLen() int32 { return 1 }
@@ -54,6 +56,8 @@ func NewRwfunc(numInsts, numReads, numWrites int32) Rwfunc {
 }
 
 func (v Rwfunc) Kind() string    { return KindRwfunc }
+
+func (v Rwfunc) IsPtr() bool	{ return false }
 func (v Rwfunc) String() string  { return "" }
 func (v Rwfunc) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Rwfunc) ArrayLen() int32 { return v.al }

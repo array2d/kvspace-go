@@ -13,13 +13,13 @@ type XValueHead struct {
 
 // HeadLen 返回整个 TLV 帧字节数：[1B][kind][4B al][4B raw_len][raw]
 func (h XValueHead) HeadLen() int32 {
-	return 1 + int32(len(h.Kind)) + 4 + 4 + int32(len(h.Raw))
+	return 1 + int32(len(h.Kind)) + 1 + 4 + 4 + int32(len(h.Raw))
 }
 
 // Decode 按 Kind 分发到对应的 Decode* 函数，返回 XValue。
 func (h XValueHead) Decode() XValue {
 	if h.IsPtr {
-		return Ptr{kind: h.Kind, target: string(h.Raw), al: h.ArrayLen}
+		return Ptr{kind: h.Kind, target: string(h.Raw), arraylen: h.ArrayLen, isptr: true}
 	}
 	switch h.Kind {
 	case KindInt8:
@@ -56,8 +56,6 @@ func (h XValueHead) Decode() XValue {
 		return Dict{}
 	case KindIndex:
 		return DecodeIndex(h.Raw)
-	case KindLinkIndex:
-		return DecodeLinkIndex(h.Raw)
 	case KindExtIndex:
 		return DecodeExtIndex(h.Raw)
 	case KindRwir:
@@ -72,7 +70,8 @@ func (h XValueHead) Decode() XValue {
 // 零值（nil）表示"不存在"。
 type XValue interface {
 	Kind() string
-	Encode() []byte  // 完整 TLV 编码：[1B kind_len][N B kind][4B al LE][4B raw_len LE][M B raw]
+	IsPtr() bool
+	Encode() []byte  // 完整 TLV 编码：[1B kind_len][N B kind][1B isptr][4B arraylen LE][4B raw_len LE][M B raw]
 	ByteLen() int32  // 数据字节长度
 	ArrayLen() int32 // None=0, scalar=1, array=N
 	String() string  // 纯值，无 kind 前缀（fmt.Stringer）
@@ -83,6 +82,7 @@ type XValue interface {
 type None struct{}
 
 func (None) Kind() string    { return "" }
+func (None) IsPtr() bool      { return false }
 func (None) Encode() []byte  { return nil }
 func (None) ByteLen() int32  { return 0 }
 func (None) ArrayLen() int32 { return 0 }
@@ -97,30 +97,29 @@ func IsNone(v XValue) bool {
 }
 
 // ── Ptr ───────────────────────────────────────────────────────────────────
-//
-// Ptr 表示一个指针值：body 为目标 key 路径，Kind 为目标类型。
-// TLV 编码时设置 isptr 位（bit7 of header byte）。
 
 type Ptr struct {
-	kind   string // 目标类型
-	target string // 目标 key 路径
-	al     int32  // ArrayLen
+	kind     string // 目标类型
+	target   string // 目标 key 路径
+	arraylen int32
+	isptr    bool // always true
 }
 
-func NewPtr(kind, target string, al int32) Ptr {
-	return Ptr{kind: kind, target: target, al: al}
+func NewPtr(kind, target string, arraylen int32) Ptr {
+	return Ptr{kind: kind, target: target, arraylen: arraylen, isptr: true}
 }
 
 func (v Ptr) Kind() string    { return v.kind }
+func (v Ptr) IsPtr() bool      { return v.isptr }
 func (v Ptr) String() string  { return "→" + v.target }
 func (v Ptr) ByteLen() int32  { return int32(len(v.target)) }
-func (v Ptr) ArrayLen() int32 { return v.al }
-func (v Ptr) Encode() []byte  { return TLVEncodePtr(v.kind, []byte(v.target), v.al) }
+func (v Ptr) ArrayLen() int32 { return v.arraylen }
+func (v Ptr) Encode() []byte  { return TLVEncodePtr(v.kind, []byte(v.target), v.arraylen) }
 func (v Ptr) Target() string  { return v.target }
 
 func IsPtr(v XValue) bool {
-	_, ok := v.(Ptr)
-	return ok
+	if v == nil { return false }
+	return v.IsPtr()
 }
 
 func PtrTarget(v XValue) string {
@@ -132,27 +131,27 @@ func PtrTarget(v XValue) string {
 
 // ── TLV 编解码 ───────────────────────────────────────────────────────────
 //
-// 格式：[1B: b7=isptr, b6-0=kind_len][N B kind_name][4B al LE][4B raw_len LE][M B raw_value]
+// 格式：[1B kind_len][N B kind][1B isptr][4B arraylen LE][4B raw_len LE][M B raw]
 // isptr=1 时 raw 为指针目标 key 路径，Kind 为目标类型。
 // None 编码为 nil。
 
-func TLVEncode(kind string, raw []byte, al int32) []byte {
-	if al <= 0 {
-		al = 1
+func TLVEncode(kind string, raw []byte, arraylen int32) []byte {
+	if arraylen <= 0 {
+		arraylen = 1
 	}
-	buf := make([]byte, 1+len(kind)+4+4+len(raw))
-	buf[0] = byte(len(kind)) // isptr=0
+	buf := make([]byte, 1+len(kind)+1+4+4+len(raw))
+	buf[0] = byte(len(kind))
 	copy(buf[1:], kind)
-	binary.LittleEndian.PutUint32(buf[1+len(kind):], uint32(al))
-	binary.LittleEndian.PutUint32(buf[1+len(kind)+4:], uint32(len(raw)))
-	copy(buf[1+len(kind)+8:], raw)
+	buf[1+len(kind)] = 0 // isptr=0
+	binary.LittleEndian.PutUint32(buf[1+len(kind)+1:], uint32(arraylen))
+	binary.LittleEndian.PutUint32(buf[1+len(kind)+1+4:], uint32(len(raw)))
+	copy(buf[1+len(kind)+1+8:], raw)
 	return buf
 }
 
-// TLVEncodePtr 同 TLVEncode，但设置 isptr 位（bit7=1）。
-func TLVEncodePtr(kind string, raw []byte, al int32) []byte {
-	buf := TLVEncode(kind, raw, al)
-	buf[0] |= 0x80
+func TLVEncodePtr(kind string, raw []byte, arraylen int32) []byte {
+	buf := TLVEncode(kind, raw, arraylen)
+	buf[1+len(kind)] = 1
 	return buf
 }
 
@@ -160,21 +159,21 @@ func DecodeXValueHead(data []byte) XValueHead {
 	if len(data) == 0 {
 		return XValueHead{}
 	}
-	isPtr := data[0]&0x80 != 0
-	kindLen := int(data[0] & 0x7F)
-	if len(data) < 1+kindLen+4+4 {
+	kindLen := int(data[0])
+	if len(data) < 1+kindLen+1+4+4 {
 		return XValueHead{}
 	}
 	kind := string(data[1 : 1+kindLen])
-	al := int32(binary.LittleEndian.Uint32(data[1+kindLen : 1+kindLen+4]))
-	rawLen := binary.LittleEndian.Uint32(data[1+kindLen+4 : 1+kindLen+8])
-	start := 1 + kindLen + 8
+	isPtr := data[1+kindLen] != 0
+	arraylen := int32(binary.LittleEndian.Uint32(data[1+kindLen+1 : 1+kindLen+1+4]))
+	rawLen := binary.LittleEndian.Uint32(data[1+kindLen+1+4 : 1+kindLen+1+8])
+	start := 1 + kindLen + 1 + 8
 	if len(data) < start+int(rawLen) {
 		return XValueHead{}
 	}
 	raw := make([]byte, rawLen)
 	copy(raw, data[start:start+int(rawLen)])
-	return XValueHead{Kind: kind, ArrayLen: al, Raw: raw, IsPtr: isPtr}
+	return XValueHead{Kind: kind, IsPtr: isPtr, ArrayLen: arraylen, Raw: raw}
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────

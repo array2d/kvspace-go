@@ -12,6 +12,8 @@ type Index struct{ childs []string }
 func NewIndex(children []string) Index { return Index{childs: children} }
 
 func (v Index) Kind() string    { return KindIndex }
+
+func (v Index) IsPtr() bool	{ return false }
 func (v Index) String() string  { return fmt.Sprintf("(%d)", len(v.childs)) }
 func (v Index) ByteLen() int32  { return int32(len([]byte(strings.Join(v.childs, IndexValueSep)))) }
 func (v Index) ArrayLen() int32 { return 1 }
@@ -27,22 +29,6 @@ func DecodeIndex(xvaluebody []byte) Index {
 	return Index{childs: strings.Split(s, IndexValueSep)}
 }
 
-// ── LinkIndex ────────────────────────────────────────────────────────────
-
-type LinkIndex struct{ target string }
-
-func NewLinkIndex(target string) LinkIndex { return LinkIndex{target: target} }
-
-func (v LinkIndex) Kind() string    { return KindLinkIndex }
-func (v LinkIndex) String() string  { return "→" + v.target }
-func (v LinkIndex) ByteLen() int32  { return int32(len(v.target)) }
-func (v LinkIndex) ArrayLen() int32 { return 1 }
-func (v LinkIndex) Encode() []byte  { return TLVEncode(KindLinkIndex, []byte(v.target), 1) }
-
-func (v LinkIndex) Target() string { return v.target }
-
-func DecodeLinkIndex(xvaluebody []byte) LinkIndex { return LinkIndex{target: string(xvaluebody)} }
-
 // ── ExtIndex ─────────────────────────────────────────────────────────────
 
 type ExtIndex struct {
@@ -55,6 +41,8 @@ func NewExtIndex(children []string, extpath string) ExtIndex {
 }
 
 func (v ExtIndex) Kind() string    { return KindExtIndex }
+
+func (v ExtIndex) IsPtr() bool	{ return false }
 func (v ExtIndex) String() string  { return fmt.Sprintf("(%d) …%s", len(v.childs), v.extpath) }
 func (v ExtIndex) ByteLen() int32 {
 	body := encodeExtIndexRaw(v.extpath, v.childs)

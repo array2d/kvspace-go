@@ -43,8 +43,6 @@ func fmtKindVal(v XValue) string {
 		return fmt.Sprintf("r%d/w%d", v.NumReads(), v.NumWrites()) + ":" + KindRwfunc
 	case Ptr:
 		return fmt.Sprintf("→%s:%s", v.Target(), v.Kind())
-	case LinkIndex:
-		return "→" + v.Target()
 	default:
 		if len(v.Encode()) > 0 {
 			return fmtPlain(v) + ":" + v.Kind()
