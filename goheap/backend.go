@@ -1098,8 +1098,6 @@ func (b *backend) resolveParentLocked(path string) string {
 	return result
 }
 
-func (b *backend) resolveOneLocked(path string) (string, bool) { return path, false }
-
 func (b *backend) acquireQueue(key string) *notifyQueue {
 	b.store.queuesMu.Lock()
 	queue := b.store.queues[key]

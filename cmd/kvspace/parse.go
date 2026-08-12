@@ -25,7 +25,8 @@ func ParseValue(raw string) (kvspace.XValue, error) {
 
 	idx := strings.Index(raw, ":")
 	if idx < 0 {
-		return kvspace.NewChar(raw), nil
+		raw := []byte(raw)
+		return kvspace.NewUint8(raw...), nil
 	}
 	kind, repr := raw[:idx], raw[idx+1:]
 	switch kind {
@@ -51,7 +52,8 @@ func ParseValue(raw string) (kvspace.XValue, error) {
 			return nil, fmt.Errorf("invalid bool: %q", repr)
 		}
 	case "string":
-		return kvspace.NewChar(repr), nil
+		raw := []byte(repr)
+		return kvspace.NewUint8(raw...), nil
 	case "nil":
 		return kvspace.None{}, nil
 	case kvspace.KindIndex:

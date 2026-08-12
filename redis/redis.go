@@ -4,8 +4,6 @@ package redis
 import (
 	"context"
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,12 +15,6 @@ func init() { kvspace.Register("redis", ConnPool) }
 
 var bg = context.Background()
 
-var redisLogLv = func() int {
-	if v, _ := strconv.Atoi(os.Getenv("KVSPACE_REDIS_LOG")); v > 0 {
-		return v
-	}
-	return 0
-}()
 
 const notifyPrefix = "__notify:"
 

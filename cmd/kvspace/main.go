@@ -127,7 +127,7 @@ func main() {
 		if len(sub) < 3 {
 			exitUsage("kvspace notify <key> <value>")
 		}
-		if err := kv.Notify(sub[1], kvspace.NewChar(sub[2])); err != nil {
+		if err := kv.Notify(sub[1], kvspace.NewUint8([]byte(sub[2])...)); err != nil {
 			fatalf("%v", err)
 		}
 	case "clear":

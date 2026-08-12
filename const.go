@@ -36,25 +36,28 @@ var (
 // ── XValueHead kind ──────────────────────────────────────────────────────────────
 
 const (
-	KindNone      = "None"
-	DictSep       = "."
-	KindBool      = "bool"
-	KindInt8      = "int8"
-	KindInt16     = "int16"
-	KindInt32     = "int32"
-	KindInt64     = "int64"
-	KindUint8     = "uint8"
-	KindUint16    = "uint16"
-	KindUint32    = "uint32"
-	KindUint64    = "uint64"
-	KindFloat32   = "float32"
-	KindFloat64   = "float64"
-	KindString    = "string"
-	KindBytes     = "bytes"
-	KindArray1d   = "array1d"
-	KindDict      = "dict"
-	KindIndex     = "index"
-	KindExtIndex  = "extindex"  // 扩展索引，写留在上层
+	KindNone = "None"
+	DictSep  = "."
+
+	// kind 继承树：byte 是所有定长数值类型的祖先。
+	// 字节宽度由 ElemSize(kind) 定义——任何 elemSize>0 的 kind 继承 byte。
+	KindByte       = "byte"       // 基础字节，elemSize=1
+	KindBool       = "bool"       // → byte, 1B
+	KindInt8       = "int8"       // → byte, 1B
+	KindUint8      = "uint8"      // → byte, 1B
+	KindStringByte = "stringbyte" // → byte, 1B×N (UTF-8)
+	KindInt16      = "int16"      // → byte, 2B
+	KindUint16     = "uint16"     // → byte, 2B
+	KindInt32      = "int32"      // → byte, 4B
+	KindUint32     = "uint32"     // → byte, 4B
+	KindFloat32    = "float32"    // → byte, 4B
+	KindInt64      = "int64"      // → byte, 8B
+	KindUint64     = "uint64"     // → byte, 8B
+	KindFloat64    = "float64"    // → byte, 8B
+
+	KindDict     = "dict"
+	KindIndex    = "index"
+	KindExtIndex = "extindex" // 扩展索引，写留在上层
 
 	KindRwir   = "rwir"   // 原子读写指令槽
 	KindRwfunc = "rwfunc" // 函数定义（复合 rwir）
