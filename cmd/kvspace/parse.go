@@ -56,6 +56,8 @@ func ParseValue(raw string) (kvspace.XValue, error) {
 		return kvspace.None{}, nil
 	case kvspace.KindIndex:
 		return kvspace.NewIndex(nil), nil
+	case kvspace.KindDict:
+		return kvspace.NewDictIndex(nil), nil
 	default:
 		return nil, fmt.Errorf("unknown kind: %q", kind)
 	}

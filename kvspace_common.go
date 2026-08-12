@@ -358,7 +358,7 @@ func JoinPath(parent, child string) string {
 	if parent == PathSep {
 		return PathSep + child
 	}
-	if strings.HasSuffix(parent, PathSep) {
+	if strings.HasSuffix(parent, PathSep) || strings.HasSuffix(parent, DictSep) {
 		return parent + child
 	}
 	return parent + PathSep + child
@@ -376,6 +376,32 @@ func SepPath(path string) (prefix, last string) {
 		return PathSep, path[1:]
 	}
 	return path[:i], path[i+1:]
+}
+
+// SplitDictParent 检查 path 末段是否包含 DictSep，
+// 若 DictSep 前的 key 是 struct 目录，返回 dictDir 和 member。
+func SplitDictParent(kv KVSpace, path string) (dictDir, member string, ok bool) {
+	parent, last := SepPath(path)
+	dot := strings.LastIndex(last, DictSep)
+	if dot < 0 {
+		return "", "", false
+	}
+	member = last[dot+1:]
+	if member == "" {
+		return "", "", false
+	}
+	if parent != PathSep {
+		parent += DirIndexSuf
+	}
+	if dot == 0 {
+		return "", "", false
+	}
+	dictDir = parent + last[:dot+1]
+	v := GetOne(kv, dictDir)
+	if v.Kind() == KindDict {
+		return dictDir, member, true
+	}
+	return "", "", false
 }
 
 // MkIndexRecursive 递归创建目录，已存在的目录跳过。
