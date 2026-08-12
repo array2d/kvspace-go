@@ -4,19 +4,19 @@ package kvspace
 import "time"
 
 // KVPair 用于批量写入，顺序确定（非 map）。
+// Arridx<0 写全值；Arridx>=0 且 ArrayLen>1 时仅写 raw[idx] 位置。
 type KVPair struct {
-	Key string
-	Val XValue
+	Key    string
+	Val    XValue
+	Arridx int32
 }
 
 // KVSpace KV 存储接口。
 //
 // 使用模式：
 //
-//	kv.Set([]KVPair{{"/vt/0/pc", NewChar("init/[0,0]")}})
-//	v := kv.Get("/vt/0", []string{"pc"}, true)[0]
-//	kv.Notify("/vt/0/status", NewChar("running"))
-//	val := kv.Watch("/vt/0/status", 5*time.Second)
+//	kv.Set([]KVPair{{"/vt/0/pc", NewChar("init/[0,0]"), -1}})
+//	v := kv.Get("/vt/0", []string{"pc"}, true, -1)[0]
 //
 // Watch/Notify 语义：监听单个 key 的值变化通知，不是通用消息队列。
 //
@@ -28,8 +28,9 @@ type KVPair struct {
 // 不穿透 target；路径中的祖先链接仍穿透（Del("/alias/x") 删 /real/x）。
 type KVSpace interface {
 	// ── 单点读写 ─────────────────────────────────────────────────────────
-	// resolve: 是否穿透 link。true=获取 target 的值（默认），false=获取 link 本身。
-	Get(prefix string, keys []string, resolve bool) []XValue
+	// arridx<0 返回全值；arridx>=0 且 ArrayLen>1 时返回 raw[arridx] 的标量值。
+	Get(prefix string, keys []string, resolve bool, arridx int32) []XValue
+	// Arridx<0 写全值；Arridx>=0 且 ArrayLen>1 时仅写 raw[Arridx] 位置。
 	Set(pairs []KVPair) error // 写入并维护目录索引。总是穿透 link 写入 target。
 
 	// ── 目录操作 ─────────────────────────────────────────────────────────

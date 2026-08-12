@@ -14,7 +14,7 @@ import (
 
 // ── Get ───────────────────────────────────────────────────────────────────────
 
-func (r *redisImpl) Get(prefix string, keys []string, resolve bool) []kvspace.XValue {
+func (r *redisImpl) Get(prefix string, keys []string, resolve bool, arridx int32) []kvspace.XValue {
 	ctx := bg
 	assertDir(prefix)
 	if resolve {
@@ -40,7 +40,7 @@ func (r *redisImpl) Get(prefix string, keys []string, resolve bool) []kvspace.XV
 
 		data, err := r.rdb.Get(ctx, full).Bytes()
 		if err == nil {
-			results[i] = kvspace.DecodeXValueHead(data).Decode()
+			results[i] = decodeElem(data, arridx)
 			continue
 		}
 		if err != goredis.Nil {
@@ -51,7 +51,7 @@ func (r *redisImpl) Get(prefix string, keys []string, resolve bool) []kvspace.XV
 			targetKey := kvspace.JoinPath(extT, k)
 			data, err := r.rdb.Get(ctx, targetKey).Bytes()
 			if err == nil {
-				results[i] = kvspace.DecodeXValueHead(data).Decode()
+				results[i] = decodeElem(data, arridx)
 				continue
 			}
 			if err != goredis.Nil {
@@ -61,6 +61,17 @@ func (r *redisImpl) Get(prefix string, keys []string, resolve bool) []kvspace.XV
 		results[i] = kvspace.None{}
 	}
 	return results
+}
+
+func decodeElem(data []byte, arridx int32) kvspace.XValue {
+	if arridx < 0 {
+		return kvspace.DecodeXValueHead(data).Decode()
+	}
+	head := kvspace.DecodeXValueHead(data)
+	if head.ArrayLen > arridx {
+		return kvspace.SliceElem(head.Kind, head.Raw, arridx)
+	}
+	return kvspace.None{}
 }
 
 func (r *redisImpl) getDir(ctx context.Context, dir string) kvspace.XValue {
@@ -235,6 +246,19 @@ func (r *redisImpl) Mkindex(path string) error {
 
 // ── Set ───────────────────────────────────────────────────────────────────────
 
+func encodeSetVal(r *redisImpl, ctx context.Context, key string, val kvspace.XValue, arridx int32) []byte {
+	if arridx < 0 {
+		return val.Encode()
+	}
+	data, err := r.rdb.Get(ctx, key).Bytes()
+	if err != nil {
+		panic(fmt.Errorf("Set arridx: read existing %s: %w", key, err))
+	}
+	head := kvspace.DecodeXValueHead(data)
+	kvspace.WriteElem(head.Kind, head.Raw, arridx, val)
+	return kvspace.EncodeRaw(head.Kind, head.IsPtr, head.Raw, head.ArrayLen)
+}
+
 func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 	ctx := bg
 	pipe := r.rdb.Pipeline()
@@ -266,7 +290,7 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 		if isDir(resolved) {
 			parent, name = parentName(resolved)
 			kvspace.MkIndexRecursive(r, parent)
-			pipe.Set(ctx, resolved, val.Encode(), 0)
+			pipe.Set(ctx, resolved, encodeSetVal(r, ctx, resolved, val, p.Arridx), 0)
 			children = append(children, childEntry{parent, name + suffixFor(resolved)})
 			continue
 		}
@@ -303,7 +327,7 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 			}
 		}
 
-		pipe.Set(ctx, resolved, val.Encode(), 0)
+		pipe.Set(ctx, resolved, encodeSetVal(r, ctx, resolved, val, p.Arridx), 0)
 		children = append(children, childEntry{parent, name})
 	}
 

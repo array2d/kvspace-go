@@ -73,7 +73,7 @@ type backend struct {
 
 var _ kvspace.KVSpace = (*backend)(nil)
 
-func (b *backend) Get(prefix string, keys []string, resolve bool) []kvspace.XValue {
+func (b *backend) Get(prefix string, keys []string, resolve bool, arridx int32) []kvspace.XValue {
 	b.mustBegin()
 	defer b.end()
 	mustValidDirPath(prefix)
@@ -97,19 +97,36 @@ func (b *backend) Get(prefix string, keys []string, resolve bool) []kvspace.XVal
 			full = b.resolvePathLocked(full)
 		}
 		if v, ok := b.valueLocked(full); ok {
-			results[i] = v
+			results[i] = sliceElem(v, arridx)
 			continue
 		}
 		if hasExt {
 			target := b.resolvePathLocked(kvspace.JoinPath(extPrefix, key))
 			if v, ok := b.valueLocked(target); ok {
-				results[i] = v
+				results[i] = sliceElem(v, arridx)
 				continue
 			}
 		}
 		results[i] = kvspace.None{}
 	}
 	return results
+}
+
+func sliceElem(v kvspace.XValue, arridx int32) kvspace.XValue {
+	if arridx < 0 || v.ArrayLen() <= arridx {
+		return v
+	}
+	return kvspace.SliceElem(v.Kind(), v.Encode()[1+len(v.Kind())+1+4+4:], arridx)
+}
+
+func encodeSetElemLocked(b *backend, key string, val kvspace.XValue, arridx int32) []byte {
+	existing, ok := b.valueLocked(key)
+	if !ok {
+		return nil
+	}
+	head := kvspace.DecodeXValueHead(existing.Encode())
+	kvspace.WriteElem(head.Kind, head.Raw, arridx, val)
+	return kvspace.EncodeRaw(head.Kind, head.IsPtr, head.Raw, head.ArrayLen)
 }
 
 func (b *backend) Set(pairs []kvspace.KVPair) error {
@@ -134,11 +151,24 @@ func (b *backend) Set(pairs []kvspace.KVPair) error {
 			validationErr = err
 			break
 		}
-		encoded, stored, err := encodeStoredValue(pair.Val)
-		if err != nil {
-			validationErr = fmt.Errorf("%w: %s", err, pair.Key)
-			break
+
+		var encoded []byte
+		if pair.Arridx >= 0 {
+			encoded = encodeSetElemLocked(b, pair.Key, pair.Val, pair.Arridx)
+			if encoded == nil {
+				validationErr = fmt.Errorf("Set arridx: key %s not found", pair.Key)
+				break
+			}
+		} else {
+			var err error
+			encoded, _, err = encodeStoredValue(pair.Val)
+			if err != nil {
+				validationErr = fmt.Errorf("%w: %s", err, pair.Key)
+				break
+			}
 		}
+
+		stored := kvspace.DecodeXValueHead(encoded).Decode()
 		var children []string
 		dir := isDir(pair.Key)
 		if dir {

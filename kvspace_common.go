@@ -177,11 +177,11 @@ func FprintArray2D(w io.Writer, kv KVSpace, prefix string, showExt, showKind boo
 // ── common helpers ────────────────────────────────────────────────────────
 
 func GetAt(kv KVSpace, dir, name string) XValue {
-	return kv.Get(dir, []string{name}, true)[0]
+	return kv.Get(dir, []string{name}, true, -1)[0]
 }
 
 func GetAtRaw(kv KVSpace, dir, name string) XValue {
-	return kv.Get(dir, []string{name}, false)[0]
+	return kv.Get(dir, []string{name}, false, -1)[0]
 }
 
 // ── tree ─────────────────────────────────────────────────────────────────
@@ -421,7 +421,7 @@ func MkIndexRecursive(kv KVSpace, path string) {
 			p += DirIndexSuf
 		}
 		if !dirExists(kv, p, n) {
-			kv.Set([]KVPair{{dir, NewIndex(nil)}})
+			kv.Set([]KVPair{{dir, NewIndex(nil), -1}})
 		}
 	}
 }
@@ -457,7 +457,7 @@ func GetOne(kv KVSpace, key string) XValue {
 	if p != PathSep {
 		p += DirIndexSuf
 	}
-	return kv.Get(p, []string{l}, true)[0]
+	return kv.Get(p, []string{l}, true, -1)[0]
 }
 
 // Walk 递归遍历 prefix 下的树。prefix 须以 / 结尾。
@@ -470,7 +470,7 @@ func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
 		} else if p != PathSep {
 			p += DirIndexSuf
 		}
-		vals := kv.Get(p, []string{l}, true)
+		vals := kv.Get(p, []string{l}, true, -1)
 		if len(vals) > 0 && !IsNone(vals[0]) {
 			fn(clean, vals[0])
 		}
