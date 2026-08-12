@@ -14,6 +14,8 @@ func NewDuration(v ...int64) Duration { return Duration{data: v} }
 
 func (v Duration) Kind() string { return "duration" }
 
+func (v Duration) IsPtr() bool	{ return false }
+
 func (v Duration) String() string {
 	if len(v.data) > 1 {
 		return fmtArray(len(v.data), func(i int) string { return formatDuration(v.data[i]) })

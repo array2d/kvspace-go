@@ -19,6 +19,8 @@ func NewChar(v ...string) Char {
 }
 
 func (v Char) Kind() string   { return KindString }
+
+func (v Char) IsPtr() bool	{ return false }
 func (v Char) String() string { return string(v.xvaluebody) }
 func (v Char) ByteLen() int32 { return int32(len(v.xvaluebody)) }
 func (v Char) ArrayLen() int32 {

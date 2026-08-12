@@ -19,6 +19,8 @@ func NewTime(v ...int64) Time {
 }
 
 func (v Time) Kind() string    { return "time" }
+
+func (v Time) IsPtr() bool	{ return false }
 func (v Time) String() string  { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatInt(v.At(i), 10) }) }
 func (v Time) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Time) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 8 }
