@@ -177,11 +177,11 @@ func FprintArray2D(w io.Writer, kv KVSpace, prefix string, showExt, showKind boo
 // ── common helpers ────────────────────────────────────────────────────────
 
 func GetAt(kv KVSpace, dir, name string) XValue {
-	return kv.Get(dir, []string{name}, true, -1)[0]
+	return kv.Get(dir, []string{name}, true)[0]
 }
 
 func GetAtRaw(kv KVSpace, dir, name string) XValue {
-	return kv.Get(dir, []string{name}, false, -1)[0]
+	return kv.Get(dir, []string{name}, false)[0]
 }
 
 // ── tree ─────────────────────────────────────────────────────────────────
@@ -404,6 +404,25 @@ func SplitDictParent(kv KVSpace, path string) (dictDir, member string, ok bool) 
 	return "", "", false
 }
 
+// SplitArrayParent 将 path 末段的分离数组索引 <i> / <i,j> 拆分为 (arrayBase, index)。
+// 纯语法解析（对标 SepPath），不校验 arrayBase 的 kind。
+func SplitArrayParent(path string) (arrayBase, index string, ok bool) {
+	parent, last := SepPath(path)
+	lt := strings.LastIndex(last, "<")
+	if lt <= 0 || !strings.HasSuffix(last, ">") {
+		return "", "", false
+	}
+	index = last[lt+1 : len(last)-1]
+	if index == "" || strings.ContainsAny(index, "<>") {
+		return "", "", false
+	}
+	if parent != PathSep {
+		parent += DirIndexSuf
+	}
+	arrayBase = parent + last[:lt]
+	return arrayBase, index, true
+}
+
 // MkIndexRecursive 递归创建目录，已存在的目录跳过。
 func MkIndexRecursive(kv KVSpace, path string) {
 	if !strings.HasSuffix(path, DirIndexSuf) {
@@ -421,7 +440,7 @@ func MkIndexRecursive(kv KVSpace, path string) {
 			p += DirIndexSuf
 		}
 		if !dirExists(kv, p, n) {
-			kv.Set([]KVPair{{dir, NewIndex(nil), -1}})
+			kv.Set([]KVPair{{dir, NewIndex(nil)}})
 		}
 	}
 }
@@ -457,7 +476,7 @@ func GetOne(kv KVSpace, key string) XValue {
 	if p != PathSep {
 		p += DirIndexSuf
 	}
-	return kv.Get(p, []string{l}, true, -1)[0]
+	return kv.Get(p, []string{l}, true)[0]
 }
 
 // Walk 递归遍历 prefix 下的树。prefix 须以 / 结尾。
@@ -470,7 +489,7 @@ func Walk(kv KVSpace, prefix string, fn func(path string, v XValue)) {
 		} else if p != PathSep {
 			p += DirIndexSuf
 		}
-		vals := kv.Get(p, []string{l}, true, -1)
+		vals := kv.Get(p, []string{l}, true)
 		if len(vals) > 0 && !IsNone(vals[0]) {
 			fn(clean, vals[0])
 		}

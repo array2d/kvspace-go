@@ -66,7 +66,7 @@ func main() {
 		if err != nil {
 			fatalf("%v", err)
 		}
-		if err := kv.Set([]kvspace.KVPair{{Key: sub[1], Val: v, Arridx: -1}}); err != nil {
+		if err := kv.Set([]kvspace.KVPair{{Key: sub[1], Val: v}}); err != nil {
 			fatalf("%v", err)
 		}
 	case "del":

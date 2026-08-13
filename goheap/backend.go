@@ -3,7 +3,6 @@ package goheap
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"strings"
 	"sync"
@@ -73,7 +72,7 @@ type backend struct {
 
 var _ kvspace.KVSpace = (*backend)(nil)
 
-func (b *backend) Get(prefix string, keys []string, resolve bool, arridx int32) []kvspace.XValue {
+func (b *backend) Get(prefix string, keys []string, resolve bool) []kvspace.XValue {
 	b.mustBegin()
 	defer b.end()
 	mustValidDirPath(prefix)
@@ -97,36 +96,19 @@ func (b *backend) Get(prefix string, keys []string, resolve bool, arridx int32) 
 			full = b.resolvePathLocked(full)
 		}
 		if v, ok := b.valueLocked(full); ok {
-			results[i] = sliceElem(v, arridx)
+			results[i] = v
 			continue
 		}
 		if hasExt {
 			target := b.resolvePathLocked(kvspace.JoinPath(extPrefix, key))
 			if v, ok := b.valueLocked(target); ok {
-				results[i] = sliceElem(v, arridx)
+				results[i] = v
 				continue
 			}
 		}
 		results[i] = kvspace.None{}
 	}
 	return results
-}
-
-func sliceElem(v kvspace.XValue, arridx int32) kvspace.XValue {
-	if arridx < 0 || v.ArrayLen() <= arridx {
-		return v
-	}
-	return kvspace.SliceElem(v.Kind(), v.Encode()[1+len(v.Kind())+1+4+4:], arridx)
-}
-
-func encodeSetElemLocked(b *backend, key string, val kvspace.XValue, arridx int32) []byte {
-	existing, ok := b.valueLocked(key)
-	if !ok {
-		return nil
-	}
-	head := kvspace.DecodeXValueHead(existing.Encode())
-	kvspace.WriteElem(head.Kind, head.Raw, arridx, val)
-	return kvspace.EncodeRaw(head.Kind, head.IsPtr, head.Raw, head.ArrayLen)
 }
 
 func (b *backend) Set(pairs []kvspace.KVPair) error {
@@ -152,23 +134,13 @@ func (b *backend) Set(pairs []kvspace.KVPair) error {
 			break
 		}
 
-		var encoded []byte
-		if pair.Arridx >= 0 {
-			encoded = encodeSetElemLocked(b, pair.Key, pair.Val, pair.Arridx)
-			if encoded == nil {
-				validationErr = fmt.Errorf("Set arridx: key %s not found", pair.Key)
-				break
-			}
-		} else {
-			var err error
-			encoded, _, err = encodeStoredValue(pair.Val)
-			if err != nil {
-				validationErr = fmt.Errorf("%w: %s", err, pair.Key)
-				break
-			}
+		encoded, _, err := encodeStoredValue(pair.Val)
+		if err != nil {
+			validationErr = fmt.Errorf("%w: %s", err, pair.Key)
+			break
 		}
 
-		stored := kvspace.DecodeXValueHead(encoded).Decode()
+		stored := kvspace.DecodeXValue(encoded)
 		var children []string
 		dir := isDir(pair.Key)
 		if dir {
@@ -417,7 +389,7 @@ func (b *backend) Watch(key string, timeout time.Duration) kvspace.XValue {
 	if !ok {
 		return kvspace.None{}
 	}
-	return kvspace.DecodeXValueHead(data).Decode()
+	return kvspace.DecodeXValue(data)
 }
 
 func (b *backend) Mkindex(path string) error {
@@ -681,7 +653,7 @@ func (b *backend) valueLocked(key string) (kvspace.XValue, bool) {
 	if !ok {
 		return nil, false
 	}
-	return kvspace.DecodeXValueHead(data).Decode(), true
+	return kvspace.DecodeXValue(data), true
 }
 
 func (b *backend) valueHasKindLocked(key, want string) bool {
@@ -1293,7 +1265,7 @@ func encodeStoredValue(value kvspace.XValue) ([]byte, kvspace.XValue, error) {
 		return []byte{}, kvspace.None{}, nil
 	}
 	encoded := value.Encode()
-	decoded := kvspace.DecodeXValueHead(encoded).Decode()
+	decoded := kvspace.DecodeXValue(encoded)
 	if decoded.Kind() != value.Kind() ||
 		decoded.ArrayLen() != value.ArrayLen() ||
 		!bytes.Equal(decoded.Encode(), encoded) {
@@ -1348,19 +1320,11 @@ func indexChild(path, name string) string {
 }
 
 func encodedValueParts(data []byte) (kind, raw []byte, ok bool) {
-	if len(data) == 0 {
+	h := kvspace.DecodeXValueHead(data)
+	if h.Kind == "" {
 		return nil, nil, false
 	}
-	kindLen := int(data[0])
-	headerLen := 1 + kindLen + 1 + 8
-	if kindLen == 0 || len(data) < headerLen {
-		return nil, nil, false
-	}
-	rawLen := int(binary.LittleEndian.Uint32(data[1+kindLen+1+4 : headerLen]))
-	if rawLen < 0 || len(data) < headerLen+rawLen {
-		return nil, nil, false
-	}
-	return data[1 : 1+kindLen], data[headerLen : headerLen+rawLen], true
+	return []byte(h.Kind), h.Body(data), true
 }
 
 func normalizeIndex(values []string) []string {

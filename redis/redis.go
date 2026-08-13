@@ -115,7 +115,7 @@ func (r *redisImpl) resolveOne(ctx context.Context, path string) (string, bool) 
 		if err != nil {
 			panic(fmt.Errorf("%w: %s err=%v", kvspace.ErrResolve, cur, err))
 		}
-		v := kvspace.DecodeXValueHead(data).Decode()
+		v := kvspace.DecodeXValue(data)
 		if kvspace.IsPtr(v) {
 			target := kvspace.PtrTarget(v)
 			if i+1 < len(parts) {

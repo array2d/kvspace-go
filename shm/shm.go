@@ -52,7 +52,7 @@ func (s *store) Get(prefix string, keys []string, resolve bool) []kvspace.XValue
 			continue
 		}
 		buf := C.GoBytes(unsafe.Pointer(v), vl)
-		results[i] = kvspace.DecodeXValueHead(buf).Decode()
+		results[i] = kvspace.DecodeXValue(buf)
 	}
 	return results
 }
@@ -161,7 +161,7 @@ func (s *store) Watch(key string, timeout time.Duration) kvspace.XValue {
 		return kvspace.None{}
 	}
 	buf := C.GoBytes(unsafe.Pointer(v), vl)
-	return kvspace.DecodeXValueHead(buf).Decode()
+	return kvspace.DecodeXValue(buf)
 }
 
 func (s *store) Clear() error {
