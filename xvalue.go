@@ -49,8 +49,8 @@ func (h XValueHead) Decode(body []byte) XValue {
 		return DecodeInt64(body)
 	case KindUint8:
 		return DecodeUint8(body)
-	case KindStringByte:
-		return DecodeStringByte(body)
+	case KindCharByte:
+		return DecodeCharByte(body)
 	case KindUint16:
 		return DecodeUint16(body)
 	case KindUint32:
@@ -283,7 +283,7 @@ func IsByteDerived(kind string) bool { return ElemSize(kind) > 0 }
 // ElemSize 返回 kind 的单元素字节数；≤0 表示非定长类型（非 byte 派生）。
 func ElemSize(kind string) int32 {
 	switch kind {
-	case KindInt8, KindUint8, KindStringByte, KindBool:
+	case KindInt8, KindUint8, KindCharByte, KindBool:
 		return 1
 	case KindInt16, KindUint16:
 		return 2

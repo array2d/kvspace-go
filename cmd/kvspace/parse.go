@@ -53,7 +53,7 @@ func ParseValue(raw string) (kvspace.XValue, error) {
 		}
 	case "string":
 		raw := []byte(repr)
-		return kvspace.NewStringByte(raw...), nil
+		return kvspace.NewCharByte(raw...), nil
 	case "nil":
 		return kvspace.None{}, nil
 	case kvspace.KindIndex:

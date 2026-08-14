@@ -2,33 +2,33 @@ package kvspace
 
 import "fmt"
 
-// ── StringByte ───────────────────────────────────────────────────────────
+// ── CharByte ───────────────────────────────────────────────────────────
 
-type StringByte struct{ data []uint8 }
+type CharByte struct{ data []uint8 }
 
-func NewStringByte(v ...uint8) StringByte { return StringByte{data: v} }
+func NewCharByte(v ...uint8) CharByte { return CharByte{data: v} }
 
-func (v StringByte) Kind() string    { return KindStringByte }
-func (v StringByte) IsPtr() bool     { return false }
-func (v StringByte) ByteLen() int32  { return int32(len(v.data)) }
-func (v StringByte) ArrayLen() int32 { return int32(len(v.data)) }
-func (v StringByte) Encode() []byte {
-	return TLVEncode(KindStringByte, copyBytes(v.data), v.ArrayLen())
+func (v CharByte) Kind() string    { return KindCharByte }
+func (v CharByte) IsPtr() bool     { return false }
+func (v CharByte) ByteLen() int32  { return int32(len(v.data)) }
+func (v CharByte) ArrayLen() int32 { return int32(len(v.data)) }
+func (v CharByte) Encode() []byte {
+	return TLVEncode(KindCharByte, copyBytes(v.data), v.ArrayLen())
 }
-func (v StringByte) String() string       { return string(v.data) }
-func (v StringByte) ValueString() string  { return string(v.data) }
-func (v StringByte) CodeString() string   { return KindStringByte + ":" + string(v.data) }
-func (v StringByte) At(idx int) uint8 {
+func (v CharByte) String() string       { return string(v.data) }
+func (v CharByte) ValueString() string  { return string(v.data) }
+func (v CharByte) CodeString() string   { return KindCharByte + ":" + string(v.data) }
+func (v CharByte) At(idx int) uint8 {
 	if idx < 0 || idx >= len(v.data) {
-		panic(fmt.Sprintf("StringByte.At: index %d out of range [0,%d)", idx, len(v.data)))
+		panic(fmt.Sprintf("CharByte.At: index %d out of range [0,%d)", idx, len(v.data)))
 	}
 	return v.data[idx]
 }
 
-func DecodeStringByte(raw []byte) StringByte {
+func DecodeCharByte(raw []byte) CharByte {
 	data := make([]uint8, len(raw))
 	copy(data, raw)
-	return StringByte{data: data}
+	return CharByte{data: data}
 }
 
 func copyBytes(b []uint8) []byte {

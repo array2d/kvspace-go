@@ -44,7 +44,7 @@ const (
 	KindBool       = "bool"       // → uint8, 1B
 	KindInt8       = "int8"       // → uint8, 1B
 	KindUint8      = "uint8"      // 基础字节，1B
-	KindStringByte = "stringbyte" // → uint8, 1B×N (UTF-8)
+	KindCharByte = "charbyte" // → uint8, 1B×N (UTF-8)
 	KindInt16      = "int16"      // → uint8, 2B
 	KindUint16     = "uint16"     // → uint8, 2B
 	KindInt32      = "int32"      // → uint8, 4B
