@@ -3,6 +3,7 @@ package kvspace
 import (
 	"encoding/binary"
 	"fmt"
+	"strings"
 )
 
 // ── Rwir ─────────────────────────────────────────────────────────────────
@@ -55,6 +56,23 @@ func NewRwfunc(numInsts, numReads, numWrites int32) Rwfunc {
 	binary.LittleEndian.PutUint16(raw[0:2], uint16(numReads))
 	binary.LittleEndian.PutUint16(raw[2:4], uint16(numWrites))
 	return Rwfunc{xvaluebody: raw, al: numInsts}
+}
+
+// NewRwfuncWithTypes 创建带参数类型标注（kindexp）的 rwfunc。body 追加 \n 分隔的参数类型串。
+func NewRwfuncWithTypes(numInsts, numReads, numWrites int32, paramTypes []string) Rwfunc {
+	raw := make([]byte, 4+len(strings.Join(paramTypes, "\n")))
+	binary.LittleEndian.PutUint16(raw[0:2], uint16(numReads))
+	binary.LittleEndian.PutUint16(raw[2:4], uint16(numWrites))
+	copy(raw[4:], strings.Join(paramTypes, "\n"))
+	return Rwfunc{xvaluebody: raw, al: numInsts}
+}
+
+// ParamTypes 返回参数类型标注（kindexp）列表；无标注则 nil。
+func (v Rwfunc) ParamTypes() []string {
+	if len(v.xvaluebody) <= 4 {
+		return nil
+	}
+	return strings.Split(string(v.xvaluebody[4:]), "\n")
 }
 
 func (v Rwfunc) Kind() string    { return KindRwfunc }
