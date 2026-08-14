@@ -1,10 +1,12 @@
 package kvspace
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ── extindex helpers ──────────────────────────────────────────────────────
@@ -477,6 +479,38 @@ func GetOne(kv KVSpace, key string) XValue {
 		p += DirIndexSuf
 	}
 	return kv.Get(p, []string{l}, true)[0]
+}
+
+// WatchValue 通用指数回退等待：轮询 GetOne(key) 直到 == targetValue。
+// 先自旋（无 sleep），随后轮询间隔按指数回退，封顶 tickDuration。
+// 生产者只需 Set(key, targetValue)；无通知队列，跨进程/节点/后端通用。
+func WatchValue(kv KVSpace, key string, targetValue XValue, tickDuration time.Duration) XValue {
+	const spinCount = 100
+	cur := time.Duration(0)
+	for i := 0; ; i++ {
+		if v := GetOne(kv, key); equalXValue(v, targetValue) {
+			return v
+		}
+		if i < spinCount {
+			continue
+		}
+		if cur == 0 {
+			cur = time.Microsecond
+		} else if cur < tickDuration {
+			cur *= 2
+			if cur > tickDuration {
+				cur = tickDuration
+			}
+		}
+		time.Sleep(cur)
+	}
+}
+
+func equalXValue(a, b XValue) bool {
+	if a.Kind() != b.Kind() {
+		return false
+	}
+	return bytes.Equal(BodyBytes(a), BodyBytes(b))
 }
 
 // Walk 递归遍历 prefix 下的树。prefix 须以 / 结尾。

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/array2d/kvspace-go"
 	_ "github.com/array2d/kvspace-go/goheap"
@@ -25,7 +26,7 @@ func main() {
 	dsn := fs.String("kvspace", defaultKVSpace(), "kvspace DSN (redis://host:port)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: kvspace [--kvspace dsn] <subcommand> [args]")
-		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mkindex delextindex extindex list|ls array2d tree dump watch notify clear")
+		fmt.Fprintln(os.Stderr, "subcommands: get set del deltree mkindex delextindex extindex list|ls array2d tree dump watch clear")
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[1:])
@@ -123,13 +124,6 @@ func main() {
 		})
 	case "watch":
 		cmdWatch(kv, sub[1:])
-	case "notify":
-		if len(sub) < 3 {
-			exitUsage("kvspace notify <key> <value>")
-		}
-		if err := kv.Notify(sub[1], kvspace.NewUint8([]byte(sub[2])...)); err != nil {
-			fatalf("%v", err)
-		}
 	case "clear":
 		if err := kv.Clear(); err != nil {
 			fatalf("%v", err)
@@ -162,9 +156,10 @@ func cmdList(kv kvspace.KVSpace, args []string) {
 
 func cmdWatch(kv kvspace.KVSpace, args []string) {
 	fs := flag.NewFlagSet("watch", flag.ExitOnError)
-	timeout := fs.Duration("timeout", 0, "timeout (e.g. 5s, 1m); 0 = block forever")
+	value := fs.String("value", "", "target value (charbyte) to wait for")
+	tick := fs.Duration("tick", time.Second, "final poll interval (exponential backoff cap)")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: kvspace watch [--timeout duration] <key>")
+		fmt.Fprintln(os.Stderr, "usage: kvspace watch [--value <val>] [--tick duration] <key>")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
@@ -172,7 +167,7 @@ func cmdWatch(kv kvspace.KVSpace, args []string) {
 		fs.Usage()
 		os.Exit(1)
 	}
-	fmt.Println(kv.Watch(fs.Arg(0), *timeout))
+	fmt.Println(kv.Watch(fs.Arg(0), kvspace.NewCharByte([]byte(*value)...), *tick).ValueString())
 }
 
 func cmdTree(kv kvspace.KVSpace, args []string) {

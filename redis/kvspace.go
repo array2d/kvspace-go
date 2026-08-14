@@ -492,20 +492,8 @@ func (r *redisImpl) DelTree(prefix string) error {
 
 // ── Notify / Watch ────────────────────────────────────────────────────────────
 
-func (r *redisImpl) Notify(key string, val kvspace.XValue) error {
-	ctx := bg
-	resolved := r.resolvePath(ctx, key)
-	return r.rdb.LPush(ctx, notifyPrefix+resolved, val.Encode()).Err()
-}
-
-func (r *redisImpl) Watch(key string, timeout time.Duration) kvspace.XValue {
-	ctx := bg
-	resolved := r.resolvePath(ctx, key)
-	results, err := r.rdb.BLPop(ctx, timeout, notifyPrefix+resolved).Result()
-	if err != nil || len(results) < 2 {
-		return kvspace.None{}
-	}
-	return kvspace.DecodeXValue([]byte(results[1]))
+func (r *redisImpl) Watch(key string, targetValue kvspace.XValue, tickDuration time.Duration) kvspace.XValue {
+	return kvspace.WatchValue(r, key, targetValue, tickDuration)
 }
 
 // Link removed

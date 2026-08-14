@@ -358,38 +358,8 @@ func (b *backend) DelTree(prefix string) error {
 	return nil
 }
 
-func (b *backend) Notify(key string, val kvspace.XValue) error {
-	if err := b.begin(); err != nil {
-		return err
-	}
-	defer b.end()
-	if err := validateAbsolutePath(key); err != nil {
-		return err
-	}
-	encoded, _, err := encodeStoredValue(val)
-	if err != nil {
-		return fmt.Errorf("%w: %s", err, key)
-	}
-	b.store.mu.RLock()
-	defer b.store.mu.RUnlock()
-	resolved := b.resolvePathLocked(key)
-	queue := b.acquireQueue(resolved)
-	defer b.releaseQueue(resolved, queue)
-	queue.push(encoded)
-	return nil
-}
-
-func (b *backend) Watch(key string, timeout time.Duration) kvspace.XValue {
-	b.mustBegin()
-	defer b.end()
-	mustValidPath(key)
-	resolved, queue := b.resolvedQueue(key)
-	data, ok := queue.pop(timeout, b.done)
-	b.releaseQueue(resolved, queue)
-	if !ok {
-		return kvspace.None{}
-	}
-	return kvspace.DecodeXValue(data)
+func (b *backend) Watch(key string, targetValue kvspace.XValue, tickDuration time.Duration) kvspace.XValue {
+	return kvspace.WatchValue(b, key, targetValue, tickDuration)
 }
 
 func (b *backend) Mkindex(path string) error {

@@ -142,26 +142,8 @@ func (s *store) DelExtIndex(path string) error {
 	return nil
 }
 
-func (s *store) Notify(key string, val kvspace.XValue) error {
-	ck := C.CString(key)
-	encoded := val.Encode()
-	cv := C.CBytes(encoded)
-	C.kvspace_notify(s.ptr, ck, (*C.uint8_t)(cv), C.int32_t(len(encoded)))
-	C.free(cv)
-	C.free(unsafe.Pointer(ck))
-	return nil
-}
-
-func (s *store) Watch(key string, timeout time.Duration) kvspace.XValue {
-	ck := C.CString(key)
-	var vl C.int32_t
-	v := C.kvspace_watch(s.ptr, ck, C.int32_t(timeout.Milliseconds()), &vl)
-	C.free(unsafe.Pointer(ck))
-	if v == nil || vl == 0 {
-		return kvspace.None{}
-	}
-	buf := C.GoBytes(unsafe.Pointer(v), vl)
-	return kvspace.DecodeXValue(buf)
+func (s *store) Watch(key string, targetValue kvspace.XValue, tickDuration time.Duration) kvspace.XValue {
+	return kvspace.WatchValue(s, key, targetValue, tickDuration)
 }
 
 func (s *store) Clear() error {

@@ -13,13 +13,12 @@ type KVPair struct {
 //
 // 使用模式：
 //
-//	kv.Set([]KVPair{{"/vt/0/pc", NewStringByte([]byte("init/[0,0]")...)}})
+//	kv.Set([]KVPair{{"/vt/0/pc", NewCharByte([]byte("init/[0,0]")...)}})
 //	v := kv.Get("/vt/0", []string{"pc"}, true)[0]
 //
-// Watch/Notify 语义：监听单个 key 的值变化通知，不是通用消息队列。
-//
-//	Notify(key, val) 向等待者投递 val；不等价于 Set（不写持久值）。
-//	Watch(key, timeout) 阻塞等待下一次 Notify；超时返回 None{}。
+// Watch 语义：阻塞等待 Get(key) == targetValue。
+// 先自旋（无 sleep），随后轮询间隔按指数回退，封顶 tickDuration。
+// 生产者只需 Set(key, targetValue)；无通知队列，跨进程/节点/后端通用。
 //
 // 软链接透明穿透：Set 写入 Ptr 值（*kind:target）后，访问 /linkpath/x 透明地访问 target/x。
 // 删除语义例外（POSIX rm 式）：Del/DelTree 的最终组件作用于链接本体，
@@ -36,9 +35,8 @@ type KVSpace interface {
 	Del(keys ...string) error    // POSIX rm: 最终组件是 link → 删 link 本体
 	DelTree(prefix string) error // 递归删除；prefix 本身是链接则只删链接
 
-	// ── 变更通知 ─────────────────────────────────────────────────────────
-	Notify(key string, val XValue) error                    // 投递一次性通知信号（穿透 link）
-	Watch(key string, timeout time.Duration) XValue // 阻塞等待通知（穿透 link）
+	// ── 变更等待 ─────────────────────────────────────────────────────────
+	Watch(key string, targetValue XValue, tickDuration time.Duration) XValue // 阻塞等待 Get(key)==targetValue
 
 	// ── 目录创建 ─────────────────────────────────────────────────────────
 	Mkindex(path string) error // 递归创建目录，类似 mkdir -p；path 须以 / 结尾
