@@ -3,7 +3,7 @@ package kvspace
 import (
 	"encoding/binary"
 	"fmt"
-	"strconv"
+	"time"
 )
 
 // ── Time ─────────────────────────────────────────────────────────────────
@@ -21,8 +21,13 @@ func NewTime(v ...int64) Time {
 func (v Time) Kind() string    { return "time" }
 
 func (v Time) IsPtr() bool	{ return false }
-func (v Time) String() string       { return fmtArray(int(v.ArrayLen()), func(i int) string { return strconv.FormatInt(v.At(i), 10) }) }
-func (v Time) ValueString() string  { return strconv.FormatInt(v.At(0), 10) }
+func (v Time) String() string {
+	if v.ArrayLen() > 1 {
+		return fmtArray(int(v.ArrayLen()), func(i int) string { return formatTime(v.At(i)) })
+	}
+	return formatTime(v.At(0))
+}
+func (v Time) ValueString() string  { return formatTime(v.At(0)) }
 func (v Time) CodeString() string   { return "time:" + v.ValueString() }
 func (v Time) ByteLen() int32  { return int32(len(v.xvaluebody)) }
 func (v Time) ArrayLen() int32 { return int32(len(v.xvaluebody)) / 8 }
@@ -36,3 +41,6 @@ func (v Time) At(idx int) int64 {
 }
 
 func DecodeTime(xvaluebody []byte) Time { return Time{xvaluebody: xvaluebody} }
+
+// formatTime 用 Go 布局 "2006/01/02 15:04:05" 格式化 time 值（如 2006/08/30 23:23:32）。
+func formatTime(ns int64) string { return time.Unix(0, ns).Format("2006/01/02 15:04:05") }

@@ -3,7 +3,7 @@ package kvspace
 import (
 	"encoding/binary"
 	"fmt"
-	"strings"
+	"time"
 )
 
 // ── Duration ─────────────────────────────────────────────────────────────
@@ -16,50 +16,14 @@ func (v Duration) Kind() string { return "duration" }
 
 func (v Duration) IsPtr() bool	{ return false }
 
-func (v Duration) ValueString() string { return formatDuration(v.At(0)) }
+func (v Duration) ValueString() string { return time.Duration(v.At(0)).String() }
 func (v Duration) CodeString() string  { return "duration:" + v.ValueString() }
 
 func (v Duration) String() string {
 	if len(v.data) > 1 {
-		return fmtArray(len(v.data), func(i int) string { return formatDuration(v.data[i]) })
+		return fmtArray(len(v.data), func(i int) string { return time.Duration(v.data[i]).String() })
 	}
-	return formatDuration(v.data[0])
-}
-
-// formatDuration 对齐 Go time.Duration.String()：0s / 1.5s / 2m3s / 1h2m3s
-func formatDuration(ns int64) string {
-	if ns == 0 {
-		return "0s"
-	}
-	sign := ""
-	if ns < 0 {
-		sign = "-"
-		ns = -ns
-	}
-	h := ns / 3600_000_000_000
-	ns %= 3600_000_000_000
-	m := ns / 60_000_000_000
-	ns %= 60_000_000_000
-	s := ns / 1_000_000_000
-	rem := ns % 1_000_000_000
-
-	parts := make([]string, 0, 3)
-	showMin := m > 0 || h > 0
-	if h > 0 {
-		parts = append(parts, fmt.Sprintf("%dh", h))
-	}
-	if showMin {
-		parts = append(parts, fmt.Sprintf("%dm", m))
-	}
-	// 总是带 s：0s / 1.5s / 2m0s / 1h0m0s（对齐 Go time.Duration.String）
-	if rem == 0 {
-		parts = append(parts, fmt.Sprintf("%ds", s))
-	} else {
-		frac := fmt.Sprintf("%09d", rem)
-		frac = strings.TrimRight(frac, "0")
-		parts = append(parts, fmt.Sprintf("%d.%ss", s, frac))
-	}
-	return sign + strings.Join(parts, "")
+	return time.Duration(v.data[0]).String()
 }
 
 func (v Duration) ByteLen() int32  { return int32(len(v.data) * 8) }
