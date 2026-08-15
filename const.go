@@ -44,7 +44,9 @@ const (
 	KindBool       = "bool"       // → uint8, 1B
 	KindInt8       = "int8"       // → uint8, 1B
 	KindUint8      = "uint8"      // 基础字节，1B
-	KindCharByte = "charbyte" // → uint8, 1B×N (UTF-8)
+	KindChar      = "char/utf32" // 码点，4B×N（默认字符串，定宽）
+	KindCharUtf8  = "char/utf8"  // UTF-8 字节串，1B×N（变宽，存储/交换）
+	KindCharAscii = "char/ascii" // ASCII 字节串，1B×N（定宽）
 	KindInt16      = "int16"      // → uint8, 2B
 	KindUint16     = "uint16"     // → uint8, 2B
 	KindInt32      = "int32"      // → uint8, 4B
