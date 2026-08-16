@@ -380,49 +380,44 @@ func SepPath(path string) (prefix, last string) {
 	return path[:i], path[i+1:]
 }
 
-// SplitDictParent 检查 path 末段是否包含 DictSep，
-// 若 DictSep 前的 key 是 struct 目录，返回 dictDir 和 member。
-func SplitDictParent(kv KVSpace, path string) (dictDir, member string, ok bool) {
-	parent, last := SepPath(path)
-	dot := strings.LastIndex(last, DictSep)
-	if dot < 0 {
-		return "", "", false
-	}
-	member = last[dot+1:]
-	if member == "" {
-		return "", "", false
-	}
-	if parent != PathSep {
-		parent += DirIndexSuf
-	}
-	if dot == 0 {
-		return "", "", false
-	}
-	dictDir = parent + last[:dot+1]
-	v := GetOne(kv, dictDir)
-	if v.Kind() == KindDict {
-		return dictDir, member, true
-	}
-	return "", "", false
-}
+// SepKind 统一 KV 路径中 4 种 index 目录分隔符的种类。
+//   / → SepDir   层级目录（Index）
+//   . → SepDict  成员目录（DictIndex）
+//   [ → SepArray 数组坐标（, 是 [ ] 内的多维分隔）
+type SepKind int
 
-// SplitArrayParent 将 path 末段的分离数组索引 <i> / <i,j> 拆分为 (arrayBase, index)。
-// 纯语法解析（对标 SepPath），不校验 arrayBase 的 kind。
-func SplitArrayParent(path string) (arrayBase, index string, ok bool) {
+const (
+	SepDir   SepKind = iota // 层级目录子项（末段无 . [ 分隔符）
+	SepDict                 // dict 成员：name.member
+	SepArray                // 数组坐标：name[i] / name[i,j]
+)
+
+// SplitIndex 统一解析绝对路径末段，识别 4 种 index 分隔符：/ . [ ,
+//
+//	/lib/init     → dir=/lib/       child=init    kind=SepDir
+//	/lib/math.Pi  → dir=/lib/math.  child=Pi      kind=SepDict
+//	/lib/b[0]     → dir=/lib/       child=b[0]    kind=SepArray
+//	/lib/b[0,1]   → dir=/lib/       child=b[0,1]  kind=SepArray
+//
+// 只有 . 会路由成 dict 目录（dir 尾带 . 标记）；/ [ , 都保持层级目录的子项。
+// [ , 是「数组坐标」而非目录分隔符：代码坐标 label[i,j] 与散数组 b[i] 同形，
+// 存储层无法区分，故不路由、保留平铺（代码=数据的坐标，用 array2d 折叠展示）。
+func SplitIndex(path string) (dir, child string, kind SepKind) {
 	parent, last := SepPath(path)
-	lt := strings.LastIndex(last, "<")
-	if lt <= 0 || !strings.HasSuffix(last, ">") {
-		return "", "", false
-	}
-	index = last[lt+1 : len(last)-1]
-	if index == "" || strings.ContainsAny(index, "<>") {
-		return "", "", false
-	}
 	if parent != PathSep {
 		parent += DirIndexSuf
 	}
-	arrayBase = parent + last[:lt]
-	return arrayBase, index, true
+	if i := strings.LastIndex(last, DictSep); i > 0 {
+		if m := last[i+1:]; m != "" {
+			return parent + last[:i+1], m, SepDict
+		}
+	}
+	if i := strings.LastIndex(last, "["); i > 0 && strings.HasSuffix(last, "]") {
+		if idx := last[i+1 : len(last)-1]; idx != "" && !strings.ContainsAny(idx, "[]") {
+			return parent, last, SepArray
+		}
+	}
+	return parent, last, SepDir
 }
 
 // MkIndexRecursive 递归创建目录，已存在的目录跳过。

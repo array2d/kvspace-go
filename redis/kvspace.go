@@ -160,15 +160,23 @@ func (r *redisImpl) addChild(ctx context.Context, pipe goredis.Pipeliner, parent
 	}
 }
 
-func (r *redisImpl) removeChild(ctx context.Context, pipe goredis.Pipeliner, parent, name string) {
+func (r *redisImpl) removeChild(ctx context.Context, pipe goredis.Pipeliner, parent string, names ...string) {
 	data, err := r.rdb.Get(ctx, parent).Bytes()
 	if err != nil {
 		if err == goredis.Nil {
 			return
 		}
-		panic(fmt.Errorf("%w: removeChild %s/%s err=%v", kvspace.ErrGet, parent, name, err))
+		panic(fmt.Errorf("%w: removeChild %s err=%v", kvspace.ErrGet, parent, err))
 	}
 	v := kvspace.DecodeXValue(data)
+	isRemoved := func(n string) bool {
+		for _, name := range names {
+			if n == name || n == name+kvspace.DirIndexSuf {
+				return true
+			}
+		}
+		return false
+	}
 	switch v := v.(type) {
 	case kvspace.Index:
 		nodes := v.Children()
@@ -177,7 +185,7 @@ func (r *redisImpl) removeChild(ctx context.Context, pipe goredis.Pipeliner, par
 		}
 		filtered := make([]string, 0, len(nodes))
 		for _, n := range nodes {
-			if n != name && n != name+kvspace.DirIndexSuf {
+			if !isRemoved(n) {
 				filtered = append(filtered, n)
 			}
 		}
@@ -189,7 +197,7 @@ func (r *redisImpl) removeChild(ctx context.Context, pipe goredis.Pipeliner, par
 		}
 		filtered := make([]string, 0, len(nodes))
 		for _, n := range nodes {
-			if n != name && n != name+kvspace.DirIndexSuf {
+			if !isRemoved(n) {
 				filtered = append(filtered, n)
 			}
 		}
@@ -197,7 +205,7 @@ func (r *redisImpl) removeChild(ctx context.Context, pipe goredis.Pipeliner, par
 	case kvspace.ExtIndex:
 		filtered := make([]string, 0, len(v.Children()))
 		for _, c := range v.Children() {
-			if c != name && c != name+kvspace.DirIndexSuf {
+			if !isRemoved(c) {
 				filtered = append(filtered, c)
 			}
 		}
@@ -271,12 +279,17 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 			continue
 		}
 
-		if sd, m, ok := kvspace.SplitDictParent(r, resolved); ok {
-			parent, name = sd, m
+		parent, name, _ = kvspace.SplitIndex(resolved)
+		if strings.HasSuffix(parent, kvspace.DictSep) {
+			// dict 目录自动建：不存在则先建空 DictIndex，供 flush 加成员；
+			// 并把 dict 目录本身注册进其父目录，list 才显示 int64. 而非穿透成员。
+			if _, err := r.rdb.Get(ctx, parent).Bytes(); err == goredis.Nil {
+				pipe.Set(ctx, parent, kvspace.NewDictIndex(nil).Encode(), 0)
+			}
+			dp, dn := parentName(parent)
+			kvspace.MkIndexRecursive(r, dp)
+			children = append(children, childEntry{dp, dn + kvspace.DictSep})
 		} else {
-			parent, name = parentName(resolved)
-		}
-		if !strings.HasSuffix(parent, kvspace.DictSep) {
 			kvspace.MkIndexRecursive(r, parent)
 		}
 
@@ -318,7 +331,7 @@ func (r *redisImpl) Set(pairs []kvspace.KVPair) error {
 		}
 		var nodes []string
 		var extpath string
-		isExt, isDict := false, false
+		isExt, isDict := false, strings.HasSuffix(parent, kvspace.DictSep)
 		if err != goredis.Nil {
 			v := kvspace.DecodeXValue(data)
 			switch v := v.(type) {
@@ -485,7 +498,7 @@ func (r *redisImpl) DelTree(prefix string) error {
 
 	parent, name := parentName(resolved)
 	pipe = r.rdb.Pipeline()
-	r.removeChild(ctx, pipe, parent, name)
+	r.removeChild(ctx, pipe, parent, name, name+kvspace.DictSep)
 	_, err = pipe.Exec(ctx)
 	return err
 }

@@ -125,8 +125,6 @@ func (b *backend) Set(pairs []kvspace.KVPair) error {
 	}
 	prepared := make([]preparedPair, 0, len(pairs))
 
-	type dictInfo struct{ parent, member string }
-	dictResolutions := make(map[string]dictInfo, len(pairs))
 	var validationErr error
 	for _, pair := range pairs {
 		if err := validateAbsolutePath(pair.Key); err != nil {
@@ -172,9 +170,6 @@ func (b *backend) Set(pairs []kvspace.KVPair) error {
 					break
 				}
 			}
-			if sd, m, ok := kvspace.SplitDictParent(b, pair.Key); ok {
-				dictResolutions[pair.Key] = dictInfo{sd, m}
-			}
 		}
 		prepared = append(prepared, preparedPair{key: pair.Key, children: children, dir: dir})
 		if !dir {
@@ -195,13 +190,14 @@ func (b *backend) Set(pairs []kvspace.KVPair) error {
 			if err := b.checkExtTargetMutationLocked(resolved, indexes, pair.children, pair.dir); err != nil {
 				return err
 			}
-			var parent, name string
-			if di, ok := dictResolutions[pair.key]; ok {
-				parent, name = di.parent, di.member
+			parent, name, _ := kvspace.SplitIndex(resolved)
+			if strings.HasSuffix(parent, kvspace.DictSep) {
+				dp, dn := parentName(parent)
+				if err := b.ensureDirCachedLocked(dp, indexes); err != nil {
+					return err
+				}
+				b.addChildCachedLocked(dp, dn, indexes)
 			} else {
-				parent, name = parentName(resolved)
-			}
-			if !strings.HasSuffix(parent, kvspace.DictSep) {
 				if err := b.ensureDirCachedLocked(parent, indexes); err != nil {
 					return err
 				}
@@ -971,6 +967,7 @@ func (b *backend) collectTreeKeysLocked(prefix string) [][]byte {
 		doomed = append(doomed, []byte(prefix))
 	}
 	addPrefix(prefix + kvspace.PathSep)
+	addPrefix(prefix + kvspace.DictSep)
 	return doomed
 }
 
@@ -1283,7 +1280,7 @@ func parentName(path string) (string, string) {
 }
 
 func indexChild(path, name string) string {
-	if name != "" && isDir(path) {
+	if name != "" && strings.HasSuffix(path, kvspace.DirIndexSuf) {
 		return name + kvspace.DirIndexSuf
 	}
 	return name
